@@ -68,27 +68,70 @@ export class Platform {
 
   private loadIdentity(): void {
     const identityDir = this.resolved.identity;
+
+    if (!fs.existsSync(identityDir)) {
+      fs.mkdirSync(identityDir, { recursive: true });
+    }
+
+    this.scaffoldIdentity(identityDir);
+
     const sections: string[] = [];
 
-    const identityFile = path.join(identityDir, 'IDENTITY.md');
-    if (fs.existsSync(identityFile)) {
-      sections.push(fs.readFileSync(identityFile, 'utf-8'));
-    }
-
-    const soulFile = path.join(identityDir, 'SOUL.md');
-    if (fs.existsSync(soulFile)) {
-      sections.push(fs.readFileSync(soulFile, 'utf-8'));
-    }
-
-    const userFile = path.join(identityDir, 'USER.md');
-    if (fs.existsSync(userFile)) {
-      sections.push(fs.readFileSync(userFile, 'utf-8'));
+    for (const file of ['IDENTITY.md', 'SOUL.md', 'USER.md']) {
+      const fp = path.join(identityDir, file);
+      if (fs.existsSync(fp)) {
+        sections.push(fs.readFileSync(fp, 'utf-8'));
+      }
     }
 
     this.identity = sections.join('\n\n---\n\n');
-    if (!this.identity) {
-      this.identity = `You are ${this.config.forge.name}, an AI assistant.`;
-      console.warn('[platform] No identity files found — using default');
+  }
+
+  private scaffoldIdentity(identityDir: string): void {
+    const name = this.config.forge.name;
+    const templates: Record<string, string> = {
+      'IDENTITY.md': [
+        `# Identity`,
+        ``,
+        `You are ${name}, an AI assistant.`,
+        ``,
+        `<!-- FIRST RUN: This is a starter template. Update this file to define who you are.`,
+        `     What is your name? What are you responsible for? What can you do?`,
+        `     Example: "You are Ember, an AI agent managing a home network and Plex server." -->`,
+      ].join('\n'),
+      'SOUL.md': [
+        `# Soul`,
+        ``,
+        `You are helpful, direct, and concise.`,
+        ``,
+        `<!-- FIRST RUN: This defines how you behave. Your personality, tone, and values.`,
+        `     Are you casual or formal? Proactive or reactive? Verbose or terse?`,
+        `     Example: "You take action first and report after. You don't ask permission for routine ops." -->`,
+      ].join('\n'),
+      'USER.md': [
+        `# User`,
+        ``,
+        `Your user has not introduced themselves yet.`,
+        `When you first interact with them, ask who they are and what they need from you.`,
+        `Update this file with what you learn.`,
+        ``,
+        `<!-- FIRST RUN: This is context about the person you serve.`,
+        `     Their name, role, technical background, preferences, and communication style.`,
+        `     The more you know, the better you can help. Ask and fill this out. -->`,
+      ].join('\n'),
+    };
+
+    let created = false;
+    for (const [filename, content] of Object.entries(templates)) {
+      const fp = path.join(identityDir, filename);
+      if (!fs.existsSync(fp)) {
+        fs.writeFileSync(fp, content, 'utf-8');
+        created = true;
+      }
+    }
+
+    if (created) {
+      console.log('[platform] Generated starter identity files in', identityDir);
     }
   }
 

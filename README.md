@@ -290,6 +290,8 @@ The `identity/` directory (gitignored) contains three files that define your age
 
 All three are loaded at boot (in that order) and injected as the system prompt for every LLM call. They're gitignored because each deployment is unique — the same codebase can host completely different agents.
 
+On first run, forge generates starter templates for all three files. `USER.md` ships with a prompt telling the agent to ask the user about themselves and fill it out — the agent bootstraps its own context through conversation.
+
 Example `identity/IDENTITY.md`:
 ```markdown
 You are Ember, an AI agent managing a home network.
