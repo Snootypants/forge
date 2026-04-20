@@ -1,4 +1,4 @@
-![Node.js 22+](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen) ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
+![Node.js 22+](https://img.shields.io/badge/node-%3E%3D22-brightgreen) ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
 # forge
 
@@ -153,7 +153,7 @@ Datasets: [LongMemEval repo](https://github.com/xiaowu0162/LongMemEval), [LOCOMO
 
 ### Prerequisites
 
-- Node.js 22+ (for `--experimental-strip-types`)
+- Node.js 22+ (minimum — 24 LTS or later recommended)
 - Claude Code CLI (`npm install -g @anthropic-ai/claude-code`)
 - Git
 
