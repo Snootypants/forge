@@ -75,6 +75,11 @@ export class Platform {
       sections.push(fs.readFileSync(identityFile, 'utf-8'));
     }
 
+    const soulFile = path.join(identityDir, 'SOUL.md');
+    if (fs.existsSync(soulFile)) {
+      sections.push(fs.readFileSync(soulFile, 'utf-8'));
+    }
+
     const userFile = path.join(identityDir, 'USER.md');
     if (fs.existsSync(userFile)) {
       sections.push(fs.readFileSync(userFile, 'utf-8'));

@@ -142,6 +142,7 @@ Datasets: [LongMemEval repo](https://github.com/xiaowu0162/LongMemEval), [LOCOMO
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │  Identity (gitignored)                                │  │
 │  │  IDENTITY.md — who the agent is                       │  │
+│  │  SOUL.md — how the agent behaves                      │  │
 │  │  USER.md — who the agent serves                       │  │
 │  └───────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
@@ -279,19 +280,27 @@ All API keys use `env:` references — they're read from environment variables o
 
 ## Identity
 
-The `identity/` directory (gitignored) contains two files that define your agent's personality:
+The `identity/` directory (gitignored) contains three files that define your agent:
 
-**`IDENTITY.md`** — the agent's system prompt. Who it is, how it behaves, what it's responsible for.
+**`IDENTITY.md`** — who the agent is. Name, role, responsibilities, capabilities.
 
-**`USER.md`** — context about the user it serves. Role, preferences, communication style.
+**`SOUL.md`** — how the agent behaves. Personality, communication style, values, behavioral directives.
 
-These are loaded at boot and injected as the system prompt for every LLM call. They're gitignored because each deployment is unique — the same codebase can host completely different agents.
+**`USER.md`** — who the agent serves. The user's role, preferences, context the agent needs to work effectively.
+
+All three are loaded at boot (in that order) and injected as the system prompt for every LLM call. They're gitignored because each deployment is unique — the same codebase can host completely different agents.
 
 Example `identity/IDENTITY.md`:
 ```markdown
 You are Ember, an AI agent managing a home network.
 You have access to the local network, Plex, and file management.
-You communicate via Slack and prioritize clear, direct responses.
+```
+
+Example `identity/SOUL.md`:
+```markdown
+You are direct, concise, and proactive.
+You take action first and report after — don't ask permission for routine ops.
+When something breaks, fix it before explaining what happened.
 ```
 
 ## Multi-Instance Deployment
@@ -674,7 +683,7 @@ forge/
 │   ├── run-locomo.ts         # LOCOMO eval harness
 │   ├── baselines/            # saved benchmark results
 │   └── data/                 # eval datasets (gitignored)
-├── identity/                 # IDENTITY.md + USER.md (gitignored)
+├── identity/                 # IDENTITY.md + SOUL.md + USER.md (gitignored)
 ├── dbs/                      # SQLite databases (gitignored)
 ├── forge.config.yaml         # main configuration
 └── .env                      # secrets (gitignored, chmod 600)
