@@ -1,0 +1,80 @@
+{
+  "mode": "hybrid",
+  "dataset": "eval/data/longmemeval_s_cleaned.json",
+  "topK": 10,
+  "totalEntries": 500,
+  "totalHits": 495,
+  "hitRate": 0.99,
+  "mrr": 0.9331880952380952,
+  "elapsed": 5236.5,
+  "byType": {
+    "multi-session": {
+      "total": 133,
+      "hits": 132,
+      "hitRate": 0.9924812030075187,
+      "mrr": 0.957393483709273
+    },
+    "temporal-reasoning": {
+      "total": 133,
+      "hits": 130,
+      "hitRate": 0.9774436090225563,
+      "mrr": 0.8855889724310777
+    },
+    "knowledge-update": {
+      "total": 78,
+      "hits": 78,
+      "hitRate": 1,
+      "mrr": 0.9871794871794872
+    },
+    "single-session-user": {
+      "total": 70,
+      "hits": 70,
+      "hitRate": 1,
+      "mrr": 0.9346598639455783
+    },
+    "single-session-assistant": {
+      "total": 56,
+      "hits": 56,
+      "hitRate": 1,
+      "mrr": 1
+    },
+    "single-session-preference": {
+      "total": 30,
+      "hits": 29,
+      "hitRate": 0.9666666666666667,
+      "mrr": 0.7683730158730158
+    }
+  },
+  "failures": [
+    {
+      "id": "d6233ab6",
+      "type": "single-session-preference",
+      "question": "I've been feeling nostalgic lately. Do you think it would be a good idea to attend my high school reunion?",
+      "expected": "The user would prefer responses that draw upon their personal experiences and memories, specifically their positive high school experiences such as being part of the debate team and taking advanced placement courses. They would prefer suggestions that highlight the potential benefits of attending the reunion, such as reconnecting with old friends and revisiting favorite subjects like history and economics. The user might not prefer generic or vague responses that do not take into account their individual experiences and interests."
+    },
+    {
+      "id": "8e91e7d9",
+      "type": "multi-session",
+      "question": "What is the total number of siblings I have?",
+      "expected": "4"
+    },
+    {
+      "id": "gpt4_468eb064",
+      "type": "temporal-reasoning",
+      "question": "Who did I meet with during the lunch last Tuesday?",
+      "expected": "Emma"
+    },
+    {
+      "id": "6e984302",
+      "type": "temporal-reasoning",
+      "question": "I mentioned an investment for a competition four weeks ago? What did I buy?",
+      "expected": "I got my own set of sculpting tools."
+    },
+    {
+      "id": "gpt4_8279ba03",
+      "type": "temporal-reasoning",
+      "question": "What kitchen appliance did I buy 10 days ago?",
+      "expected": "a smoker"
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "name": "forge-zima",
+  "version": "1.0.0",
+  "description": "Portable forge platform — agent hosting for ZimaOS and Linux",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node --experimental-strip-types src/index.ts",
+    "dev": "node --watch --experimental-strip-types src/index.ts",
+    "test": "node --experimental-strip-types --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-code": "^1.0.0",
+    "@slack/bolt": "^4.6.0",
+    "better-sqlite3": "^12.6.2",
+    "express": "^4.21.2",
+    "js-yaml": "^4.1.0",
+    "openai": "^6.34.0",
+    "sqlite-vec": "^0.1.9",
+    "ws": "^8.20.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/express": "^5.0.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.0"
+  }
+}

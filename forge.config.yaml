@@ -1,0 +1,41 @@
+forge:
+  name: forge-zima
+  version: "1.0.0"
+  root: .
+
+user:
+  name: your-name
+
+api:
+  anthropic:
+    env: ANTHROPIC_API_KEY
+  openai:
+    env: OPENAI_API_KEY
+  slack:
+    bot_token:
+      env: SLACK_BOT_TOKEN
+    app_token:
+      env: SLACK_APP_TOKEN
+    bot_user_id: ""   # optional — auto-detected on connect
+    channels: []      # optional — empty means respond in all channels bot is in
+
+models:
+  default: claude-sonnet-4-6
+  architect: claude-opus-4-6
+  sentinel: claude-haiku-4-5
+
+paths:
+  dbs: ./dbs
+  identity: ./identity
+  logs: ./logs
+
+services:
+  web:
+    port: 6800
+  daemon:
+    port: 6790
+
+budget:
+  daily_limit_cents: 5000
+  per_job_limit_cents: 1500
+  warn_at_percent: 80

@@ -1,0 +1,41 @@
+# Dependencies & build
+node_modules/
+dist/
+
+# Databases (runtime state)
+dbs/*.db
+dbs/*.db-wal
+dbs/*.db-shm
+
+# Environment & secrets
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+
+# Identity (personal system prompts)
+identity/
+
+# Eval dataset (not redistributable)
+eval/data/
+
+# Eval results (run it yourself)
+eval/results-*.json
+eval/results.json
+
+# Logs
+*.log
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Claude Code session data
+.claude/
+
+# Backups
+backup(dirty)/
