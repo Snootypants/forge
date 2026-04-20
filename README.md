@@ -1,6 +1,6 @@
 ![Node.js 22+](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen) ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
-# forge-zima
+# forge
 
 A portable agent platform with a memory system that scores **99% on LongMemEval** and **95.6% on LOCOMO** — using nothing but SQLite FTS5.
 
@@ -28,7 +28,7 @@ Want another agent? Copy the folder, change the config, start it on a different 
 
 ## How It Compares
 
-| | **forge-zima** | **MemGPT/Letta** | **Mem0** |
+| | **forge** | **MemGPT/Letta** | **Mem0** |
 |---|---|---|---|
 | LongMemEval hit rate | **99.0%** | ~75% (episodic recall) | — |
 | LOCOMO hit rate | **95.6%** | — | ~91% (claimed) |
@@ -39,7 +39,7 @@ Want another agent? Copy the folder, change the config, start it on a different 
 | Deployment | Single process, SQLite | Multi-service | SaaS / self-host |
 | Auth model | OAuth (no raw keys) | API key | API key |
 
-forge-zima achieves 99% retrieval accuracy with zero external dependencies. The optional vector search (OpenAI embeddings) improves MRR and rescues semantic edge cases but isn't required.
+forge achieves 99% retrieval accuracy with zero external dependencies. The optional vector search (OpenAI embeddings) improves MRR and rescues semantic edge cases but isn't required.
 
 ## The Memory Thesis
 
@@ -102,7 +102,7 @@ Datasets: [LongMemEval repo](https://github.com/xiaowu0162/LongMemEval), [LOCOMO
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  forge-zima                                                 │
+│  forge                                                 │
 │                                                             │
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │  Platform (singleton — boots everything)              │  │
@@ -160,8 +160,8 @@ Datasets: [LongMemEval repo](https://github.com/xiaowu0162/LongMemEval), [LOCOMO
 ### Quick Start
 
 ```bash
-git clone https://github.com/Snootypants/forge-zima.git
-cd forge-zima
+git clone https://github.com/Snootypants/forge.git
+cd forge
 npm install
 ```
 
@@ -300,14 +300,14 @@ Forge is designed for running multiple agents on the same machine:
 
 ```bash
 # Agent 1: Ember (network management)
-cp -r forge-zima ~/agents/ember
+cp -r forge ~/agents/ember
 cd ~/agents/ember
 # Edit forge.config.yaml: name: ember, port: 6800
 # Edit identity/IDENTITY.md: Ember's personality
 npm start
 
 # Agent 2: Atlas (research assistant)
-cp -r forge-zima ~/agents/atlas
+cp -r forge ~/agents/atlas
 cd ~/agents/atlas
 # Edit forge.config.yaml: name: atlas, port: 6801
 # Edit identity/IDENTITY.md: Atlas's personality
@@ -327,7 +327,7 @@ No shared state. No coordination required. They can coexist on the same box or d
 
 ```ini
 [Unit]
-Description=forge-zima agent (%i)
+Description=forge agent (%i)
 After=network.target
 
 [Service]
@@ -369,7 +369,7 @@ docker run -d \
   -v ./identity:/app/identity \
   -v ./logs:/app/logs \
   --env-file .env \
-  forge-zima
+  forge
 ```
 
 Mount `dbs/` and `identity/` as volumes so state persists across container rebuilds.
@@ -578,10 +578,10 @@ Use the memory service standalone in any Node.js application:
 ```typescript
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
-import { MemoryService } from 'forge-zima/src/services/memory.ts';
+import { MemoryService } from 'forge/src/services/memory.ts';
 
 const db = new Database('./my-app.db');
-db.exec(fs.readFileSync('path/to/forge-zima/src/db/schemas/memory.sql', 'utf-8'));
+db.exec(fs.readFileSync('path/to/forge/src/db/schemas/memory.sql', 'utf-8'));
 const memory = new MemoryService(db);
 
 // Your app's memory layer — 99% retrieval accuracy out of the box
@@ -647,7 +647,7 @@ SQLite runs entirely in-process. No database server. No ports to manage beyond t
 ## Project Structure
 
 ```
-forge-zima/
+forge/
 ├── src/
 │   ├── index.ts              # entry point — boots platform, starts servers
 │   ├── platform.ts           # singleton — DB init, service init, identity load
