@@ -20,7 +20,7 @@ function showLogin() {
   const msg = document.getElementById('chat-messages');
   msg.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:16px">
-      <div style="font-family:var(--font-mono);color:var(--accent);font-size:18px">forge/zima</div>
+      <div style="font-family:var(--font-mono);color:var(--accent);font-size:18px">forge</div>
       <input id="login-token" type="password" placeholder="Auth token"
         style="width:300px;padding:12px;font-family:var(--font-mono);font-size:14px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);outline:none">
       <button onclick="doLogin()" class="auth-btn save-btn">Connect</button>
@@ -146,7 +146,7 @@ async function loadMessages() {
     const data = await api('/api/messages/poll?limit=50');
     chatMessages.innerHTML = '';
     for (const msg of data.messages) {
-      const role = msg.userName === 'forge-zima' || msg.user === 'assistant' ? 'assistant' : 'user';
+      const role = msg.userName === 'forge' || msg.userName === 'forge-zima' || msg.user === 'assistant' ? 'assistant' : 'user';
       const meta = msg.llm_metadata ? JSON.parse(msg.llm_metadata) : null;
       addMessage(role, msg.text, false, meta ? {
         model: meta.model,
