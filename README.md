@@ -2,9 +2,9 @@
 
 # forge
 
-A portable agent platform with a memory system that scores **99% on LongMemEval** and **95.6% on LOCOMO** — using nothing but SQLite FTS5.
+Self-hosted AI agents with long-term memory that actually works.
 
-No GPU. No vector database. No embedding pipeline required.
+**99% retrieval accuracy on [LongMemEval](https://arxiv.org/abs/2410.10813). 95.6% on [LOCOMO](https://arxiv.org/abs/2402.17753). No GPU, no vector database, no embedding pipeline.** Just SQLite FTS5 running on whatever hardware you have lying around.
 
 ```
 ━━━ LongMemEval (500 entries) ━━━        ━━━ LOCOMO (1986 questions) ━━━
@@ -13,9 +13,21 @@ MRR@10:    0.9167                         MRR@10:    0.7585
 Time:      6.4s                           Time:      0.7s
 ```
 
+## Why This Exists
+
+Most agent memory systems are either cloud-locked SaaS, require a stack of infrastructure (Postgres, vector DB, embedding service), or just don't work well enough to trust with real context.
+
+Forge is different: a single-process platform that runs on a NAS, a Raspberry Pi, or a retired laptop plugged into your router. The memory system is benchmarked against published academic evals — not "it feels like it works" but actual hit rates on thousands of retrieval challenges. It scores 99% using only SQLite full-text search, which means your agent's memory works without any external API calls, without internet access, and without burning money on embeddings.
+
+The whole thing is ~2100 lines of TypeScript. One directory, one config file, one process.
+
+## What I Actually Use This For
+
+I run an instance called Ember on a 2012 MacBook Pro plugged into my home network. She manages Plex, handles file operations, monitors the local network, and talks to me over Slack. When I tell her something — a preference, a project detail, a correction — she remembers it across sessions, across days, because the memory system actually retrieves the right context. I can spin up a second agent for my wife by copying the folder and changing the config. It's my personal infrastructure, not a demo.
+
 ## What This Is
 
-A complete, single-process agent hosting platform. One directory, one config, one process — runs on anything with Node 22. Designed for low-power hardware: NAS boxes, old laptops, mini-PCs.
+A complete agent hosting platform. One directory, one config, one process — runs on anything with Node 22. Designed for low-power hardware: NAS boxes, old laptops, mini-PCs, Docker containers.
 
 Each instance is a self-contained agent with:
 - Long-term memory (FTS5 + optional vector search)
@@ -23,6 +35,7 @@ Each instance is a self-contained agent with:
 - Slack integration (Bolt Socket Mode)
 - Web UI (chat + settings)
 - 8 SQLite databases covering the full agent lifecycle
+- Three-file identity system (who the agent is, how it behaves, who it serves)
 
 Want another agent? Copy the folder, change the config, start it on a different port.
 
