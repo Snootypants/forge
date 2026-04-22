@@ -52,9 +52,13 @@ export function messagesRoutes(ctx: WebContext): Router {
       `).run(`web:user:${ts}`, ctx.config.user.name, content, ts, Date.now());
 
       const replyTs = (Date.now() + 1).toString();
+      const promptContext = JSON.stringify({
+        system: context.system,
+        messages: [{ role: 'user', content }],
+      });
       db.prepare(`
-        INSERT INTO messages (id, channel, channelName, user, userName, text, ts, threadTs, receivedAt, llm_metadata)
-        VALUES (?, 'web', 'web', 'assistant', ?, ?, ?, ?, ?, ?)
+        INSERT INTO messages (id, channel, channelName, user, userName, text, ts, threadTs, receivedAt, llm_metadata, prompt_context)
+        VALUES (?, 'web', 'web', 'assistant', ?, ?, ?, ?, ?, ?, ?)
       `).run(
         `web:assistant:${replyTs}`,
         agent ?? 'forge-zima',
@@ -63,6 +67,7 @@ export function messagesRoutes(ctx: WebContext): Router {
         ts,
         Date.now(),
         JSON.stringify({ model: response.model, inputTokens: response.inputTokens, outputTokens: response.outputTokens }),
+        promptContext,
       );
 
       res.json({
@@ -70,6 +75,7 @@ export function messagesRoutes(ctx: WebContext): Router {
         model: response.model,
         ts: replyTs,
         usage: { input: response.inputTokens, output: response.outputTokens },
+        prompt_context: promptContext,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

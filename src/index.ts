@@ -21,6 +21,7 @@ async function main(): Promise<void> {
       llm: platform.llm,
       authToken,
       identity: platform.identity,
+      identityDir: platform.resolved.identity,
     };
 
     const app = createWebServer(ctx);

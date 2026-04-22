@@ -8,6 +8,7 @@ import type { LLMService } from '../services/llm.ts';
 import { settingsRoutes } from './routes/settings.ts';
 import { messagesRoutes } from './routes/messages.ts';
 import { authRoutes } from './routes/auth.ts';
+import { identityRoutes } from './routes/identity.ts';
 
 const COOKIE_NAME = 'forge_session';
 
@@ -18,6 +19,7 @@ export interface WebContext {
   llm: LLMService;
   authToken: string;
   identity: string;
+  identityDir: string;
 }
 
 function extractToken(req: express.Request): string | null {
@@ -88,6 +90,7 @@ export function createWebServer(ctx: WebContext): express.Express {
   app.use('/api/settings', settingsRoutes(ctx));
   app.use('/api/messages', messagesRoutes(ctx));
   app.use('/api/auth', authRoutes(ctx));
+  app.use('/api/identity', identityRoutes(ctx.identityDir));
 
   app.get('*', (_req, res) => {
     res.sendFile(path.join(publicDir, 'index.html'));

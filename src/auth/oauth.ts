@@ -1,6 +1,4 @@
-import { spawn } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
+import { spawn, execSync } from 'node:child_process';
 import { saveEnvValue } from '../config.ts';
 
 export type AuthStatus = 'authenticated' | 'not_authenticated' | 'checking' | 'error';
@@ -12,22 +10,17 @@ export interface AuthState {
 }
 
 export function checkClaudeAuth(): AuthStatus {
-  const claudeDir = path.join(process.env.HOME ?? '/root', '.claude');
-  if (!fs.existsSync(claudeDir)) return 'not_authenticated';
-
-  const credFiles = ['credentials.json', '.credentials.json', 'settings.json'];
-  for (const f of credFiles) {
-    const fp = path.join(claudeDir, f);
-    if (fs.existsSync(fp)) {
-      try {
-        const content = JSON.parse(fs.readFileSync(fp, 'utf-8'));
-        if (content.oauthAccount || content.claudeAiOauth) return 'authenticated';
-      } catch {
-        continue;
-      }
-    }
+  try {
+    const result = execSync('claude auth status', {
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const status = JSON.parse(result);
+    return status.loggedIn ? 'authenticated' : 'not_authenticated';
+  } catch {
+    return 'not_authenticated';
   }
-  return 'not_authenticated';
 }
 
 export function checkSlackAuth(): AuthStatus {

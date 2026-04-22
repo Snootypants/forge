@@ -126,13 +126,18 @@ export async function startSlackListener(deps: SlackDeps): Promise<App> {
 
         const replyTs = replyResult.ts ?? '';
         const replyId = `${channel}:${replyTs}`;
+        const promptContext = JSON.stringify({
+          system: context.system,
+          messages: context.messages,
+        });
         deps.messagesDb.prepare(`
-          INSERT OR REPLACE INTO messages (id, channel, channelName, user, userName, text, ts, threadTs, mentioned, receivedAt, llm_metadata)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+          INSERT OR REPLACE INTO messages (id, channel, channelName, user, userName, text, ts, threadTs, mentioned, receivedAt, llm_metadata, prompt_context)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
         `).run(
           replyId, channel, channelName, botUserId, 'forge-zima', response.content,
           replyTs, threadTs ?? ts, Date.now(),
           JSON.stringify({ model: response.model, inputTokens: response.inputTokens, outputTokens: response.outputTokens }),
+          promptContext,
         );
       } catch (err) {
         console.error('[slack] Auto-reply error:', err);
