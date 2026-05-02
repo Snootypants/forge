@@ -2,12 +2,12 @@ import { initChat } from './chat.js';
 import { initSettings } from './settings.js';
 
 const API = '';
-let authToken = localStorage.getItem('forge_token') || '';
+let authToken = '';
 
 export async function api(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
-  const res = await fetch(`${API}${path}`, { ...opts, headers });
+  const res = await fetch(`${API}${path}`, { credentials: 'same-origin', ...opts, headers });
   if (res.status === 401) {
     showLogin();
     throw new Error('Unauthorized');
@@ -54,6 +54,7 @@ async function doLogin() {
   try {
     const res = await fetch(`${API}/api/auth/login`, {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token }),
     });
@@ -63,12 +64,25 @@ async function doLogin() {
       return;
     }
     authToken = token;
-    localStorage.setItem('forge_token', token);
     errEl.style.display = 'none';
     init();
   } catch {
     errEl.textContent = 'Connection failed';
     errEl.style.display = 'block';
+  }
+}
+
+async function loadPublicInfo() {
+  try {
+    const res = await fetch(`${API}/api/public/info`, { credentials: 'same-origin' });
+    if (!res.ok) return;
+    const info = await res.json();
+    document.querySelectorAll('.wordmark-name').forEach(el => { el.textContent = info.name || 'forge'; });
+    document.querySelectorAll('.wordmark-tag').forEach(el => {
+      el.textContent = info.version ? `memory · v${info.version}` : 'memory';
+    });
+  } catch {
+    /* public info is cosmetic */
   }
 }
 
@@ -97,4 +111,5 @@ async function init() {
   }
 }
 
+loadPublicInfo();
 init();

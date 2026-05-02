@@ -88,17 +88,9 @@ export function loadEnvFile(envPath?: string): void {
 
   const lines = fs.readFileSync(p, 'utf-8').split('\n');
   for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eqIdx = trimmed.indexOf('=');
-    if (eqIdx === -1) continue;
-    const key = trimmed.slice(0, eqIdx).trim();
-    let val = trimmed.slice(eqIdx + 1).trim();
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-      val = val.slice(1, -1);
-    }
-    if (!process.env[key]) {
-      process.env[key] = val;
+    const parsed = parseEnvLine(line);
+    if (parsed && !process.env[parsed.key]) {
+      process.env[parsed.key] = parsed.value;
     }
   }
 }
@@ -113,19 +105,66 @@ export function saveEnvValue(key: string, value: string, envPath?: string): void
   const lines = content.split('\n');
   let found = false;
   const updated = lines.map(line => {
-    const trimmed = line.trim();
-    if (trimmed.startsWith(`${key}=`)) {
+    const parsed = parseEnvLine(line);
+    if (parsed?.key === key) {
       found = true;
-      return `${key}="${value}"`;
+      return formatEnvLine(key, value);
     }
     return line;
   });
 
   if (!found) {
-    updated.push(`${key}="${value}"`);
+    updated.push(formatEnvLine(key, value));
   }
 
   fs.writeFileSync(p, updated.join('\n'), { mode: 0o600 });
+}
+
+function parseEnvLine(line: string): { key: string; value: string } | null {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith('#')) return null;
+  const normalized = trimmed.startsWith('export ') ? trimmed.slice(7).trimStart() : trimmed;
+  const eqIdx = normalized.indexOf('=');
+  if (eqIdx === -1) return null;
+
+  const key = normalized.slice(0, eqIdx).trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return null;
+
+  let value = normalized.slice(eqIdx + 1).trim();
+  if (value.startsWith('"')) {
+    const end = findClosingQuote(value, '"');
+    value = unescapeDoubleQuoted(end >= 0 ? value.slice(1, end) : value.slice(1));
+  } else if (value.startsWith("'")) {
+    const end = findClosingQuote(value, "'");
+    value = end >= 0 ? value.slice(1, end) : value.slice(1);
+  } else {
+    const hash = value.indexOf('#');
+    if (hash >= 0) value = value.slice(0, hash).trimEnd();
+  }
+
+  return { key, value };
+}
+
+function findClosingQuote(value: string, quote: '"' | "'"): number {
+  for (let i = 1; i < value.length; i++) {
+    if (value[i] === quote && value[i - 1] !== '\\') return i;
+  }
+  return -1;
+}
+
+function unescapeDoubleQuoted(value: string): string {
+  return value.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+}
+
+function formatEnvLine(key: string, value: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+    throw new Error(`Invalid env key: ${key}`);
+  }
+  const escaped = value
+    .replace(/\\/g, '\\\\')
+    .replace(/\n/g, '\\n')
+    .replace(/"/g, '\\"');
+  return `${key}="${escaped}"`;
 }
 
 export function resolveWebAuthToken(

@@ -5,6 +5,7 @@ let msgContainer = null;
 let toastFn = () => {};
 let apiCall = null;
 let assistantName = 'forge';
+let threadMetaConfig = { contextWindowTokens: 80000 };
 
 export function setMsgContainer(el) { msgContainer = el; }
 export function setMessages(m) { messages = m; }
@@ -16,6 +17,12 @@ export function setToastFn(fn) { toastFn = fn; }
 export function setApiCall(fn) { apiCall = fn; }
 export function setAssistantName(name) {
   assistantName = name || 'forge';
+}
+export function setThreadMetaConfig(config) {
+  threadMetaConfig = {
+    ...threadMetaConfig,
+    ...config,
+  };
 }
 
 function el(tag, cls) { const e = document.createElement(tag); if (cls) e.className = cls; return e; }
@@ -225,7 +232,8 @@ export function renderThreadMeta() {
   if (!c) return;
   const count = messages.length;
   const tokens = messages.reduce((a, m) => a + (m.meta?.input || 0) + (m.meta?.output || 0), 0);
-  const pct = Math.min(100, (tokens / 80000) * 100);
+  const contextWindowTokens = threadMetaConfig.contextWindowTokens || 80000;
+  const pct = Math.min(100, (tokens / contextWindowTokens) * 100);
   const initial = assistantName.trim().slice(0, 1).toUpperCase() || 'F';
 
   c.innerHTML = `<div class="thread-meta">
@@ -236,7 +244,7 @@ export function renderThreadMeta() {
       </div>
       <div class="rail-stat">
         <div class="smallcaps stat-label" style="font-size:9.5px">context</div>
-        <div class="stat-value">${(tokens / 1000).toFixed(1)}k / 80k tok</div>
+        <div class="stat-value">${(tokens / 1000).toFixed(1)}k / ${(contextWindowTokens / 1000).toFixed(0)}k tok</div>
       </div>
       <div class="context-meter"><div class="fill" style="width:${pct}%"></div></div>
     </div>

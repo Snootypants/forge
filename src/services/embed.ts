@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 import OpenAI from 'openai';
+import { resolveKey } from '../config.ts';
+import type { KeyRef } from '../types.ts';
 
 const DEFAULT_MODEL = 'text-embedding-3-small';
 const EMBEDDING_DIMENSION = 1536;
@@ -19,8 +21,8 @@ export class EmbedService {
   private cache = new Map<string, number[]>();
   private recentRequests: TpmRecord[] = [];
 
-  constructor() {
-    const apiKey = process.env.OPENAI_API_KEY;
+  constructor(openaiKey?: KeyRef) {
+    const apiKey = resolveKey(openaiKey) ?? process.env.OPENAI_API_KEY;
     if (apiKey) {
       this.client = new OpenAI({ apiKey });
       console.log('[embed] OpenAI client initialized');

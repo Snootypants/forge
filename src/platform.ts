@@ -60,7 +60,7 @@ export class Platform {
 
   private initServices(): void {
     this.memory = new MemoryService(this.dbManager.get('memory'));
-    this.embed = new EmbedService();
+    this.embed = new EmbedService(this.config.api.openai);
     this.memory.initVec(this.embed);
     this.llm = new LLMService(this.config);
     console.log('[platform] Services initialized');

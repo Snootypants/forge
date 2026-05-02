@@ -48,7 +48,8 @@ test('POST /api/messages handles /remember without calling the LLM', async () =>
       api: {},
       models: { default: 'test', architect: 'test', sentinel: 'test' },
       paths: { dbs: './dbs', identity: './identity', logs: './logs' },
-      services: { web: { port: 6800 }, daemon: { port: 6790 } },
+      services: { web: { port: 6800, context_window_tokens: 80000 }, daemon: { port: 6790 } },
+      memory: { retention_days: 30, index_rebuild_interval_minutes: 15 },
       budget: { daily_limit_cents: 1, per_job_limit_cents: 1, warn_at_percent: 80 },
     },
     dbManager: { get: () => db },
@@ -73,6 +74,7 @@ test('POST /api/messages handles /remember without calling the LLM', async () =>
     authToken: 'test',
     identity: 'You are forge.',
     identityDir: '.',
+    resolved: { root: '.', dbs: '.', identity: '.', logs: '.' },
   } as never));
 
   await withServer(app, async (url) => {
@@ -98,4 +100,41 @@ test('POST /api/messages handles /remember without calling the LLM', async () =>
     importance: 0.7,
   }]);
   assert.equal(db.runs.length, 2);
+});
+
+test('POST /api/messages rejects non-string content before DB writes', async () => {
+  const db = makeDb();
+  const app = express();
+  app.use(express.json());
+  app.use('/api/messages', messagesRoutes({
+    config: {
+      forge: { name: 'forge', version: '1.0.0', root: '.' },
+      user: { name: 'Caleb' },
+      api: {},
+      models: { default: 'test', architect: 'test', sentinel: 'test' },
+      paths: { dbs: './dbs', identity: './identity', logs: './logs' },
+      services: { web: { port: 6800, context_window_tokens: 80000 }, daemon: { port: 6790 } },
+      memory: { retention_days: 30, index_rebuild_interval_minutes: 15 },
+      budget: { daily_limit_cents: 1, per_job_limit_cents: 1, warn_at_percent: 80 },
+    },
+    dbManager: { get: () => db },
+    memory: { search: () => [] },
+    llm: { async complete() { throw new Error('should not run'); } },
+    authToken: 'test',
+    identity: 'You are forge.',
+    identityDir: '.',
+    resolved: { root: '.', dbs: '.', identity: '.', logs: '.' },
+  } as never));
+
+  await withServer(app, async (url) => {
+    const response = await fetch(`${url}/api/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: { bad: true } }),
+    });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: 'content must be a non-empty string' });
+  });
+
+  assert.equal(db.runs.length, 0);
 });

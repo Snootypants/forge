@@ -32,8 +32,13 @@ paths:
 services:
   web:
     port: 6800
+    context_window_tokens: 80000
   daemon:
     port: 6790
+
+memory:
+  retention_days: 30
+  index_rebuild_interval_minutes: 15
 
 budget:
   daily_limit_cents: 5000

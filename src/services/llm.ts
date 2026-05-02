@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url';
 import { resolveKey } from '../config.ts';
 import type { LLMRequest, LLMResponse, ForgeConfig } from '../types.ts';
 
-const DEFAULT_MAX_TURNS = 30;
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 export interface ClaudeCliRunOptions {
@@ -35,7 +34,6 @@ export class LLMService {
 
   async complete(request: LLMRequest): Promise<LLMResponse> {
     const model = request.model ?? this.config.models.default;
-    const maxTurns = request.maxTurns ?? DEFAULT_MAX_TURNS;
 
     const lastUserMsg = request.messages.findLast(m => m.role === 'user');
     if (!lastUserMsg) {
@@ -59,8 +57,6 @@ export class LLMService {
     if (anthropicApiKey) {
       args.push('--bare');
     }
-
-    void maxTurns;
 
     const result = await this.runClaudeCli(args, {
       env: buildClaudeEnv(anthropicApiKey),

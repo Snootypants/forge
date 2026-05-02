@@ -197,7 +197,7 @@ Open the web UI and configure auth via the Settings tab.
 
 #### Claude (required for LLM features)
 
-Forge uses Claude Code's OAuth — no raw `ANTHROPIC_API_KEY` ever touches this system. Auth flows through the Claude Code SDK, which manages the subscription OAuth token.
+Forge prefers Claude Code's OAuth for Claude access. You can also point `api.anthropic` at an environment variable when you intentionally want API-key auth.
 
 From the Settings UI, click **"Authenticate Claude"** — this spawns `claude auth login` which opens a browser for the OAuth flow. Once authenticated, the credential lives in `~/.claude/` and the SDK handles refresh.
 
@@ -280,11 +280,16 @@ paths:
 services:
   web:
     port: 6800
+    context_window_tokens: 80000
     # Optional. If omitted, forge uses FORGE_AUTH_TOKEN or a generated token
     # persisted in the resolved logs directory.
     # auth_token: "change-me"
   daemon:
     port: 6790
+
+memory:
+  retention_days: 30
+  index_rebuild_interval_minutes: 15
 
 budget:
   daily_limit_cents: 5000       # $50/day cap
@@ -292,7 +297,7 @@ budget:
   warn_at_percent: 80
 ```
 
-All API keys use `env:` references — they're read from environment variables or `.env` at runtime. Nothing sensitive lives in this file unless you intentionally set `services.web.auth_token`.
+API keys can use `env:` references — they're read from environment variables or `.env` at runtime. Nothing sensitive lives in this file unless you intentionally set inline `value:` entries or `services.web.auth_token`.
 
 Web auth token precedence is: `FORGE_AUTH_TOKEN`, then `services.web.auth_token`, then the persisted token file in the resolved logs directory. If none exists, forge generates a 32-byte token, writes it with `0600` permissions, and prints it during startup.
 
@@ -419,7 +424,7 @@ db.exec(fs.readFileSync('./src/db/schemas/memory.sql', 'utf-8'));
 const memory = new MemoryService(db);
 
 // 3. (Optional) Enable vector search
-const embed = new EmbedService();  // reads OPENAI_API_KEY from env
+const embed = new EmbedService(config.api.openai);  // honors configured OpenAI key refs
 memory.initVec(embed);             // loads sqlite-vec, creates vec0 table
 
 // Save a memory
@@ -711,7 +716,7 @@ forge/
 
 ## Security Model
 
-- **No raw API keys in code or config** — Claude auth via OAuth, other keys in `.env` with `chmod 600`
+- **No raw API keys in code** — prefer Claude OAuth and `env:` key refs; keep raw keys in `.env` with `chmod 600`
 - **Web UI auth** — bearer token (generated on first boot) or HttpOnly cookie, timing-safe comparison
 - **Identity files gitignored** — agent personality and user context never leave the box
 - **Database files gitignored** — all runtime state stays local

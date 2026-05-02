@@ -56,6 +56,18 @@ export function createWebServer(ctx: WebContext): express.Express {
   const publicDir = new URL('./public/', import.meta.url).pathname;
   app.use(express.static(publicDir));
 
+  app.get('/api/public/info', (_req, res) => {
+    res.json({
+      name: ctx.config.forge.name,
+      version: ctx.config.forge.version,
+      memory: {
+        retentionDays: ctx.config.memory.retention_days,
+        contextWindowTokens: ctx.config.services.web.context_window_tokens,
+        indexRebuildIntervalMinutes: ctx.config.memory.index_rebuild_interval_minutes,
+      },
+    });
+  });
+
   const authMiddleware: express.RequestHandler = (req, res, next) => {
     if (req.method === 'GET' && !req.path.startsWith('/api/')) {
       return next();

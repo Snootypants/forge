@@ -8,9 +8,11 @@
   },
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc",
+    "check": "npm run typecheck && npm test",
     "start": "node --experimental-strip-types src/index.ts",
     "dev": "node --watch --experimental-strip-types src/index.ts",
-    "test": "node --experimental-strip-types --test src/**/*.test.ts"
+    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@anthropic-ai/claude-code": "^2.1.126",

@@ -186,8 +186,12 @@ function rDatabases(c) {
 }
 
 function rMemory(c) {
+  const memory = settingsData.info.memory || {};
+  const retentionDays = memory.retentionDays ?? 30;
+  const contextWindowTokens = memory.contextWindowTokens ?? 80000;
+  const indexMinutes = memory.indexRebuildIntervalMinutes ?? 15;
   c.innerHTML = hdr('Memory', 'forge keeps one thread. Everything said becomes part of the record; these controls shape what\'s surfaced.')
-    + fld('Retention', 'How long raw turns stay before summarization.', val('30 days · then summarized'))
-    + fld('Context window', 'How much of the ledger to inject per turn.', val('adaptive · targeting 80k tokens'))
-    + fld('Index rebuild', 'How often semantic recall is recomputed.', val('every 15 minutes on change'));
+    + fld('Retention', 'How long raw turns stay before summarization.', val(`${retentionDays} days · then summarized`))
+    + fld('Context window', 'How much of the ledger to inject per turn.', val(`adaptive · targeting ${Math.round(contextWindowTokens / 1000)}k tokens`))
+    + fld('Index rebuild', 'How often semantic recall is recomputed.', val(`every ${indexMinutes} minutes on change`));
 }

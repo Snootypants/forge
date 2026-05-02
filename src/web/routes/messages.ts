@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import crypto from 'node:crypto';
 import type { WebContext } from '../server.ts';
 import { handleMemoryCommand } from '../../slack/context.ts';
 
@@ -26,33 +27,41 @@ export function messagesRoutes(ctx: WebContext): Router {
       `).all(limit).reverse();
     }
 
-    res.json({ messages: rows, agentName: ctx.config.forge.name });
+    res.json({
+      messages: rows,
+      agentName: ctx.config.forge.name,
+      ui: {
+        contextWindowTokens: ctx.config.services.web.context_window_tokens,
+      },
+    });
   });
 
   router.post('/', async (req, res) => {
     const { content } = req.body;
-    if (!content) {
-      res.status(400).json({ error: 'content required' });
+    if (typeof content !== 'string' || content.trim().length === 0) {
+      res.status(400).json({ error: 'content must be a non-empty string' });
       return;
     }
 
-    const db = ctx.dbManager.get('messages');
-    const ts = Date.now().toString();
-
-    db.prepare(`
-      INSERT INTO messages (id, channel, channelName, user, userName, text, ts, receivedAt)
-      VALUES (?, 'web', 'web', 'user', ?, ?, ?, ?)
-    `).run(`web:user:${ts}`, ctx.config.user.name, content, ts, Date.now());
-
     try {
+      const db = ctx.dbManager.get('messages');
+      const ts = Date.now().toString();
+      const userId = `web:user:${crypto.randomUUID()}`;
+
+      db.prepare(`
+        INSERT INTO messages (id, channel, channelName, user, userName, text, ts, receivedAt)
+        VALUES (?, 'web', 'web', 'user', ?, ?, ?, ?)
+      `).run(userId, ctx.config.user.name, content, ts, Date.now());
+
       const command = await handleMemoryCommand(ctx.memory, content);
       if (command) {
         const replyTs = (Date.now() + 1).toString();
+        const replyId = `web:assistant:${crypto.randomUUID()}`;
         db.prepare(`
           INSERT INTO messages (id, channel, channelName, user, userName, text, ts, threadTs, receivedAt)
           VALUES (?, 'web', 'web', 'assistant', ?, ?, ?, ?, ?)
         `).run(
-          `web:assistant:${replyTs}`,
+          replyId,
           ctx.config.forge.name,
           command.reply,
           replyTs,
@@ -76,6 +85,7 @@ export function messagesRoutes(ctx: WebContext): Router {
       });
 
       const replyTs = (Date.now() + 1).toString();
+      const replyId = `web:assistant:${crypto.randomUUID()}`;
       const promptContext = JSON.stringify({
         system: context.system,
         messages: [{ role: 'user', content }],
@@ -84,7 +94,7 @@ export function messagesRoutes(ctx: WebContext): Router {
         INSERT INTO messages (id, channel, channelName, user, userName, text, ts, threadTs, receivedAt, llm_metadata, prompt_context)
         VALUES (?, 'web', 'web', 'assistant', ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        `web:assistant:${replyTs}`,
+        replyId,
         ctx.config.forge.name,
         response.content,
         replyTs,

@@ -38,10 +38,15 @@ export const ForgeConfigSchema = z.object({
     web: z.object({
       port: z.number().default(6800),
       auth_token: z.string().optional(),
+      context_window_tokens: z.number().int().positive().default(80000),
     }).default({}),
     daemon: z.object({
       port: z.number().default(6790),
     }).default({}),
+  }).default({}),
+  memory: z.object({
+    retention_days: z.number().int().positive().default(30),
+    index_rebuild_interval_minutes: z.number().int().positive().default(15),
   }).default({}),
   budget: z.object({
     daily_limit_cents: z.number().default(5000),
@@ -113,7 +118,6 @@ export interface LLMRequest {
   system: string;
   messages: ChatMessage[];
   model?: string;
-  maxTurns?: number;
 }
 
 export interface LLMResponse {

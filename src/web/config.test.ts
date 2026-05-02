@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { clearConfigCache, loadConfig, resolveWebAuthToken } from '../config.ts';
+import { clearConfigCache, loadConfig, loadEnvFile, resolveWebAuthToken, saveEnvValue } from '../config.ts';
 
 function writeConfig(dir: string): string {
   const configPath = path.join(dir, 'forge.config.yaml');
@@ -92,6 +92,28 @@ test('web auth token is configured, persisted, and reused', () => {
       process.env.FORGE_AUTH_TOKEN = originalToken;
     }
     clearConfigCache();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('env file save/load escapes quoted values safely', () => {
+  const prior = process.env.FORGE_COMPLEX_VALUE;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-env-file-'));
+  const envPath = path.join(tmp, '.env');
+
+  try {
+    saveEnvValue('FORGE_COMPLEX_VALUE', 'quote " slash \\ newline\nend', envPath);
+    delete process.env.FORGE_COMPLEX_VALUE;
+    loadEnvFile(envPath);
+
+    assert.equal(process.env.FORGE_COMPLEX_VALUE, 'quote " slash \\ newline\nend');
+    assert.match(fs.readFileSync(envPath, 'utf-8'), /FORGE_COMPLEX_VALUE="quote \\" slash \\\\ newline\\nend"/);
+  } finally {
+    if (prior === undefined) {
+      delete process.env.FORGE_COMPLEX_VALUE;
+    } else {
+      process.env.FORGE_COMPLEX_VALUE = prior;
+    }
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });

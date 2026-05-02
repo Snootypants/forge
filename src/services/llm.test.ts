@@ -23,7 +23,8 @@ function config(overrides: Partial<ForgeConfig> = {}): ForgeConfig {
       sentinel: 'claude-sentinel',
     },
     paths: { dbs: './dbs', identity: './identity', logs: './logs' },
-    services: { web: { port: 6800 }, daemon: { port: 6790 } },
+    services: { web: { port: 6800, context_window_tokens: 80000 }, daemon: { port: 6790 } },
+    memory: { retention_days: 30, index_rebuild_interval_minutes: 15 },
     budget: { daily_limit_cents: 5000, per_job_limit_cents: 1500, warn_at_percent: 80 },
     ...overrides,
   };
@@ -63,7 +64,6 @@ test('LLMService runs Claude CLI with configured Anthropic key and sanitized env
 
     const response = await service.complete({
       system: 'system prompt',
-      maxTurns: 2,
       messages: [
         { role: 'user', content: 'first' },
         { role: 'assistant', content: 'middle' },

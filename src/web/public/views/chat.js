@@ -1,4 +1,4 @@
-import { renderAllMessages, renderInspector, renderThreadMeta, mkUser, mkAssistant, mkThinking, selectMessage, setMessages, getMessages, getThinking, setThinking, scrollToBottom, setMsgContainer, setToastFn as setRenderToast, setApiCall, setAssistantName } from './chat-render.js';
+import { renderAllMessages, renderInspector, renderThreadMeta, mkUser, mkAssistant, mkThinking, selectMessage, setMessages, getMessages, getThinking, setThinking, scrollToBottom, setMsgContainer, setToastFn as setRenderToast, setApiCall, setAssistantName, setThreadMetaConfig } from './chat-render.js';
 
 let apiCall, toastFn;
 let container, composerTextarea;
@@ -139,6 +139,7 @@ async function loadMessages() {
   const data = await apiCall('/api/messages/poll?limit=50');
   const assistantName = data.agentName || 'forge';
   setAssistantName(assistantName);
+  setThreadMetaConfig(data.ui || {});
   setMessages(data.messages.map(m => ({
     role: m.user === 'assistant' || m.userName === assistantName ? 'assistant' : 'user',
     text: m.text, ts: fmtTs(m.receivedAt), meta: parseMeta(m.llm_metadata),

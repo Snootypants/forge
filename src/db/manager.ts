@@ -77,9 +77,7 @@ export class DatabaseManager {
       db.exec(sql);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (!msg.includes('already exists')) {
-        console.error(`[db] Schema error in ${name}: ${msg}`);
-      }
+      throw new Error(`[db] Schema error in ${name}: ${msg}`);
     }
   }
 
