@@ -1,9 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import { ForgeConfigSchema, type ForgeConfig, type KeyRef, type ResolvedPaths } from './types.ts';
 
 let _cached: { config: ForgeConfig; resolved: ResolvedPaths } | null = null;
+
+const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const AUTH_TOKEN_FILENAME = 'web-auth-token';
 
 function resolveTilde(p: string): string {
   if (p.startsWith('~/') || p === '~') {
@@ -34,10 +39,19 @@ export function resolveKey(ref: KeyRef | undefined): string | null {
   return null;
 }
 
+function resolveInputPath(p: string, baseDir: string): string {
+  const expanded = resolveTilde(p);
+  return path.isAbsolute(expanded) ? expanded : path.resolve(baseDir, expanded);
+}
+
+function defaultAppPath(filename: string): string {
+  return path.join(APP_ROOT, filename);
+}
+
 export function loadConfig(configPath?: string): { config: ForgeConfig; resolved: ResolvedPaths } {
   if (_cached) return _cached;
 
-  const searchPath = configPath ?? path.join(process.cwd(), 'forge.config.yaml');
+  const searchPath = configPath ? resolveInputPath(configPath, process.cwd()) : defaultAppPath('forge.config.yaml');
   if (!fs.existsSync(searchPath)) {
     throw new Error(`Config not found: ${searchPath}`);
   }
@@ -46,7 +60,8 @@ export function loadConfig(configPath?: string): { config: ForgeConfig; resolved
   const parsed = resolveEnvVars(yaml.load(raw));
   const config = ForgeConfigSchema.parse(parsed);
 
-  const root = resolveTilde(config.forge.root);
+  const configDir = path.dirname(searchPath);
+  const root = resolveInputPath(config.forge.root, configDir);
   const resolvePath = (p: string): string => {
     const expanded = resolveTilde(p);
     return path.isAbsolute(expanded) ? expanded : path.resolve(root, expanded);
@@ -68,7 +83,7 @@ export function loadConfig(configPath?: string): { config: ForgeConfig; resolved
 }
 
 export function loadEnvFile(envPath?: string): void {
-  const p = envPath ?? path.join(process.cwd(), '.env');
+  const p = envPath ? resolveInputPath(envPath, process.cwd()) : defaultAppPath('.env');
   if (!fs.existsSync(p)) return;
 
   const lines = fs.readFileSync(p, 'utf-8').split('\n');
@@ -89,7 +104,7 @@ export function loadEnvFile(envPath?: string): void {
 }
 
 export function saveEnvValue(key: string, value: string, envPath?: string): void {
-  const p = envPath ?? path.join(process.cwd(), '.env');
+  const p = envPath ? resolveInputPath(envPath, process.cwd()) : defaultAppPath('.env');
   let content = '';
   if (fs.existsSync(p)) {
     content = fs.readFileSync(p, 'utf-8');
@@ -111,6 +126,28 @@ export function saveEnvValue(key: string, value: string, envPath?: string): void
   }
 
   fs.writeFileSync(p, updated.join('\n'), { mode: 0o600 });
+}
+
+export function resolveWebAuthToken(
+  config: ForgeConfig,
+  resolved: ResolvedPaths,
+): { token: string; source: 'env' | 'config' | 'file' | 'generated'; path?: string } {
+  const envToken = process.env.FORGE_AUTH_TOKEN?.trim();
+  if (envToken) return { token: envToken, source: 'env' };
+
+  const configToken = config.services.web.auth_token?.trim();
+  if (configToken) return { token: configToken, source: 'config' };
+
+  const tokenPath = path.join(resolved.logs, AUTH_TOKEN_FILENAME);
+  if (fs.existsSync(tokenPath)) {
+    const token = fs.readFileSync(tokenPath, 'utf-8').trim();
+    if (token) return { token, source: 'file', path: tokenPath };
+  }
+
+  fs.mkdirSync(resolved.logs, { recursive: true });
+  const token = crypto.randomBytes(32).toString('hex');
+  fs.writeFileSync(tokenPath, `${token}\n`, { mode: 0o600 });
+  return { token, source: 'generated', path: tokenPath };
 }
 
 export function clearConfigCache(): void {

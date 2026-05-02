@@ -4,6 +4,7 @@ let thinking = false;
 let msgContainer = null;
 let toastFn = () => {};
 let apiCall = null;
+let assistantName = 'forge';
 
 export function setMsgContainer(el) { msgContainer = el; }
 export function setMessages(m) { messages = m; }
@@ -13,6 +14,9 @@ export function setThinking(v) { thinking = v; }
 export function setSelectedMsgId(v) { selectedMsgId = v; }
 export function setToastFn(fn) { toastFn = fn; }
 export function setApiCall(fn) { apiCall = fn; }
+export function setAssistantName(name) {
+  assistantName = name || 'forge';
+}
 
 function el(tag, cls) { const e = document.createElement(tag); if (cls) e.className = cls; return e; }
 function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
@@ -47,7 +51,7 @@ export function mkAssistant(msg, idx, first) {
 
   div.appendChild(el('div', 'node-dot'));
   const sender = el('div', 'sender smallcaps');
-  sender.textContent = 'forge';
+  sender.textContent = assistantName;
   div.appendChild(sender);
 
   const prose = el('div', 'prose');
@@ -94,7 +98,7 @@ export function mkThinking() {
   const div = el('div', 'thinking');
   div.appendChild(el('div', 'node-dot'));
   const sender = el('div', 'sender smallcaps');
-  sender.textContent = 'forge';
+  sender.textContent = assistantName;
   sender.style.color = 'var(--accent-ink)';
   sender.style.fontSize = '10px';
   sender.style.marginBottom = '6px';
@@ -173,7 +177,7 @@ export function renderInspector() {
   if (!msg || msg.role !== 'assistant') {
     c.innerHTML = `<div class="inspector-empty">
       <div class="smallcaps" style="margin-bottom:8px">Inspector</div>
-      Click any forge reply to see the metadata that produced it.</div>`;
+      Click any ${esc(assistantName)} reply to see the metadata that produced it.</div>`;
     return;
   }
 
@@ -222,6 +226,7 @@ export function renderThreadMeta() {
   const count = messages.length;
   const tokens = messages.reduce((a, m) => a + (m.meta?.input || 0) + (m.meta?.output || 0), 0);
   const pct = Math.min(100, (tokens / 80000) * 100);
+  const initial = assistantName.trim().slice(0, 1).toUpperCase() || 'F';
 
   c.innerHTML = `<div class="thread-meta">
     <div style="display:flex;flex-direction:column;gap:14px">
@@ -238,8 +243,8 @@ export function renderThreadMeta() {
     <div style="border-top:1px solid var(--rule);padding-top:14px">
       <div class="smallcaps" style="margin-bottom:8px">Agent</div>
       <div class="agent-row">
-        <span class="initial" style="background:var(--accent-wash-strong);color:var(--accent-ink)">E</span>
-        <span class="name">Ember</span>
+        <span class="initial" style="background:var(--accent-wash-strong);color:var(--accent-ink)">${esc(initial)}</span>
+        <span class="name">${esc(assistantName)}</span>
         <div style="flex:1;min-width:8px"></div>
         <span class="time">now</span>
       </div>

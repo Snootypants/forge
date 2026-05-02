@@ -6,6 +6,7 @@ interface ContextInput {
   messagesDb: Database.Database;
   memory: MemoryService;
   identity: string;
+  assistantName: string;
   channel: string;
   threadTs: string;
   currentMessage: string;
@@ -15,6 +16,47 @@ interface ContextInput {
 interface BuiltContext {
   system: string;
   messages: ChatMessage[];
+}
+
+export interface MemoryCommandResult {
+  reply: string;
+  memoryId?: string;
+}
+
+export async function handleMemoryCommand(memory: MemoryService, text: string): Promise<MemoryCommandResult | null> {
+  const trimmed = text.trim();
+  const remember = trimmed.match(/^\/remember(?:\s+([\s\S]+))?$/i);
+  if (remember) {
+    const content = remember[1]?.trim();
+    if (!content) {
+      return { reply: 'Usage: /remember <text to save>' };
+    }
+
+    const id = await memory.save({
+      type: 'chat',
+      content,
+      tags: ['chat', 'explicit'],
+      confidence: 1.0,
+      importance: 0.7,
+    });
+
+    return { reply: `Remembered. Memory ID: ${id}`, memoryId: id };
+  }
+
+  const forget = trimmed.match(/^\/forget(?:\s+(\S+))?$/i);
+  if (forget) {
+    const id = forget[1]?.trim();
+    if (!id) {
+      return { reply: 'Usage: /forget <memory-id>' };
+    }
+
+    return {
+      reply: memory.remove(id) ? `Forgot memory ${id}.` : `No memory found for ID: ${id}`,
+      memoryId: id,
+    };
+  }
+
+  return null;
 }
 
 export function buildContext(input: ContextInput): BuiltContext {
@@ -69,7 +111,7 @@ export function buildContext(input: ContextInput): BuiltContext {
   const messages: ChatMessage[] = [];
   if (threadMessages.length > 1) {
     for (const msg of threadMessages.slice(0, -1)) {
-      const role = msg.userName === 'forge-zima' ? 'assistant' : 'user';
+      const role = msg.userName === input.assistantName ? 'assistant' : 'user';
       messages.push({ role, content: msg.text, name: msg.userName });
     }
   }

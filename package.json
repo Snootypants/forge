@@ -1,5 +1,5 @@
 {
-  "name": "forge-zima",
+  "name": "forge",
   "version": "1.0.0",
   "description": "Portable forge platform — agent hosting for ZimaOS and Linux",
   "type": "module",
@@ -13,7 +13,7 @@
     "test": "node --experimental-strip-types --test src/**/*.test.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-code": "^1.0.0",
+    "@anthropic-ai/claude-code": "^2.1.126",
     "@slack/bolt": "^4.6.0",
     "better-sqlite3": "^12.6.2",
     "express": "^4.21.2",

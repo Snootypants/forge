@@ -187,7 +187,7 @@ npm start
 
 On first boot:
 1. Creates all 8 SQLite databases in `./dbs/`
-2. Generates a random auth token (printed to console — save it)
+2. Generates a web auth token, saves it under `./logs/`, and prints it once
 3. Starts the web UI on `http://0.0.0.0:6800`
 4. Skips Slack if no tokens are configured (normal)
 
@@ -280,6 +280,9 @@ paths:
 services:
   web:
     port: 6800
+    # Optional. If omitted, forge uses FORGE_AUTH_TOKEN or a generated token
+    # persisted in the resolved logs directory.
+    # auth_token: "change-me"
   daemon:
     port: 6790
 
@@ -289,7 +292,9 @@ budget:
   warn_at_percent: 80
 ```
 
-All API keys use `env:` references — they're read from environment variables or `.env` at runtime. Nothing sensitive lives in this file.
+All API keys use `env:` references — they're read from environment variables or `.env` at runtime. Nothing sensitive lives in this file unless you intentionally set `services.web.auth_token`.
+
+Web auth token precedence is: `FORGE_AUTH_TOKEN`, then `services.web.auth_token`, then the persisted token file in the resolved logs directory. If none exists, forge generates a 32-byte token, writes it with `0600` permissions, and prints it during startup.
 
 ## Identity
 

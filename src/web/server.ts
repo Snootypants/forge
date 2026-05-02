@@ -1,7 +1,7 @@
 import express from 'express';
 import crypto from 'node:crypto';
 import path from 'node:path';
-import type { ForgeConfig } from '../types.ts';
+import type { ForgeConfig, ResolvedPaths } from '../types.ts';
 import type { DatabaseManager } from '../db/manager.ts';
 import type { MemoryService } from '../services/memory.ts';
 import type { LLMService } from '../services/llm.ts';
@@ -20,6 +20,7 @@ export interface WebContext {
   authToken: string;
   identity: string;
   identityDir: string;
+  resolved: ResolvedPaths;
 }
 
 function extractToken(req: express.Request): string | null {

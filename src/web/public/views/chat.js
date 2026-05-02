@@ -1,4 +1,4 @@
-import { renderAllMessages, renderInspector, renderThreadMeta, mkUser, mkAssistant, mkThinking, selectMessage, setMessages, getMessages, getThinking, setThinking, scrollToBottom, setMsgContainer, setToastFn as setRenderToast, setApiCall } from './chat-render.js';
+import { renderAllMessages, renderInspector, renderThreadMeta, mkUser, mkAssistant, mkThinking, selectMessage, setMessages, getMessages, getThinking, setThinking, scrollToBottom, setMsgContainer, setToastFn as setRenderToast, setApiCall, setAssistantName } from './chat-render.js';
 
 let apiCall, toastFn;
 let container, composerTextarea;
@@ -137,8 +137,10 @@ function fmtTs(ts) {
 
 async function loadMessages() {
   const data = await apiCall('/api/messages/poll?limit=50');
+  const assistantName = data.agentName || 'forge';
+  setAssistantName(assistantName);
   setMessages(data.messages.map(m => ({
-    role: m.user === 'assistant' || m.userName === 'forge' || m.userName === 'forge-zima' ? 'assistant' : 'user',
+    role: m.user === 'assistant' || m.userName === assistantName ? 'assistant' : 'user',
     text: m.text, ts: fmtTs(m.receivedAt), meta: parseMeta(m.llm_metadata),
     promptContext: parsePromptContext(m.prompt_context),
   })));
@@ -153,7 +155,7 @@ function buildComposer() {
 
   composerTextarea = document.createElement('textarea');
   composerTextarea.className = 'composer-input';
-  composerTextarea.placeholder = 'Write to forge…';
+  composerTextarea.placeholder = 'Write a message…';
   composerTextarea.rows = 1;
 
   const sendBtn = el('button', 'composer-send idle');
@@ -162,7 +164,7 @@ function buildComposer() {
   inner.appendChild(box);
 
   const hints = el('div', 'composer-hints');
-  hints.innerHTML = '<span class="mono">⏎ send</span><span class="mono">⇧⏎ newline</span><div style="flex:1"></div><span class="mono" style="color:var(--ink-faint)">memory enabled · single thread</span>';
+  hints.innerHTML = '<span class="mono">⏎ send</span><span class="mono">⇧⏎ newline</span><div style="flex:1"></div><span class="mono" style="color:var(--ink-faint)">/remember · /forget</span>';
   inner.appendChild(hints);
   wrapper.appendChild(inner);
 
@@ -202,11 +204,12 @@ async function doSend() {
     const data = await apiCall('/api/messages', {
       method: 'POST', body: JSON.stringify({ content: text }),
     });
+    if (data.agentName) setAssistantName(data.agentName);
     thinkEl.remove();
     const idx = msgs.length;
     msgs.push({
       role: 'assistant', text: data.reply, ts: nowTs(),
-      meta: { model: data.model, input: data.usage.input, output: data.usage.output },
+      meta: data.model && data.usage ? { model: data.model, input: data.usage.input, output: data.usage.output } : null,
       promptContext: parsePromptContext(data.prompt_context),
     });
     mc.appendChild(mkAssistant(msgs[idx], idx, false));

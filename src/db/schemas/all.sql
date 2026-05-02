@@ -30,19 +30,21 @@ CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
   tokenize='porter'
 );
 
-CREATE TRIGGER IF NOT EXISTS documents_fts_insert AFTER INSERT ON documents BEGIN
-  INSERT INTO documents_fts(source, content, source_id)
-  VALUES (new.source, new.content, new.source_id);
+DROP TRIGGER IF EXISTS documents_fts_insert;
+DROP TRIGGER IF EXISTS documents_fts_delete;
+DROP TRIGGER IF EXISTS documents_fts_update;
+
+CREATE TRIGGER documents_fts_insert AFTER INSERT ON documents BEGIN
+  INSERT INTO documents_fts(rowid, source, content, source_id)
+  VALUES (new.id, new.source, new.content, new.source_id);
 END;
 
-CREATE TRIGGER IF NOT EXISTS documents_fts_delete AFTER DELETE ON documents BEGIN
-  INSERT INTO documents_fts(documents_fts, source, content, source_id)
-  VALUES ('delete', old.source, old.content, old.source_id);
+CREATE TRIGGER documents_fts_delete AFTER DELETE ON documents BEGIN
+  DELETE FROM documents_fts WHERE rowid = old.id;
 END;
 
-CREATE TRIGGER IF NOT EXISTS documents_fts_update AFTER UPDATE ON documents BEGIN
-  INSERT INTO documents_fts(documents_fts, source, content, source_id)
-  VALUES ('delete', old.source, old.content, old.source_id);
-  INSERT INTO documents_fts(source, content, source_id)
-  VALUES (new.source, new.content, new.source_id);
+CREATE TRIGGER documents_fts_update AFTER UPDATE ON documents BEGIN
+  DELETE FROM documents_fts WHERE rowid = old.id;
+  INSERT INTO documents_fts(rowid, source, content, source_id)
+  VALUES (new.id, new.source, new.content, new.source_id);
 END;

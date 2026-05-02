@@ -3,7 +3,8 @@ import type Database from 'better-sqlite3';
 import type { LLMService } from '../services/llm.ts';
 import type { MemoryService } from '../services/memory.ts';
 import type { ForgeConfig } from '../types.ts';
-import { buildContext } from './context.ts';
+import { resolveKey } from '../config.ts';
+import { buildContext, handleMemoryCommand } from './context.ts';
 
 interface SlackDeps {
   config: ForgeConfig;
@@ -43,9 +44,20 @@ function enqueueThread(key: string, fn: () => Promise<void>): void {
   drainThread(key);
 }
 
+export function isSlackChannelAllowed(channel: string, allowedChannels: string[] = []): boolean {
+  if (allowedChannels.length === 0) return true;
+  return allowedChannels.includes(channel);
+}
+
+export function resolveSlackTokens(config: ForgeConfig): { botToken: string | null; appToken: string | null } {
+  return {
+    botToken: resolveKey(config.api.slack?.bot_token) ?? process.env.SLACK_BOT_TOKEN ?? null,
+    appToken: resolveKey(config.api.slack?.app_token) ?? process.env.SLACK_APP_TOKEN ?? null,
+  };
+}
+
 export async function startSlackListener(deps: SlackDeps): Promise<App> {
-  const botToken = process.env.SLACK_BOT_TOKEN;
-  const appToken = process.env.SLACK_APP_TOKEN;
+  const { botToken, appToken } = resolveSlackTokens(deps.config);
   if (!botToken || !appToken) {
     throw new Error('SLACK_BOT_TOKEN and SLACK_APP_TOKEN required');
   }
@@ -73,6 +85,7 @@ export async function startSlackListener(deps: SlackDeps): Promise<App> {
     if (userId === botUserId) return;
     if (subtype === 'message_deleted' || subtype === 'message_changed') return;
     if (!text.trim()) return;
+    if (!isSlackChannelAllowed(channel, deps.config.api.slack?.channels ?? [])) return;
 
     if (seen.has(clientMsgId)) return;
     seen.add(clientMsgId);
@@ -98,47 +111,66 @@ export async function startSlackListener(deps: SlackDeps): Promise<App> {
 
     const threadKey = threadTs ?? ts;
     enqueueThread(`${channel}:${threadKey}`, async () => {
+      const assistantName = deps.config.forge.name;
+      const saveAssistantReply = (replyTs: string, replyText: string, promptContext: string | null, metadata: string | null) => {
+        const replyId = `${channel}:${replyTs}`;
+        deps.messagesDb.prepare(`
+          INSERT OR REPLACE INTO messages (id, channel, channelName, user, userName, text, ts, threadTs, mentioned, receivedAt, llm_metadata, prompt_context)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+        `).run(
+          replyId, channel, channelName, botUserId, assistantName, replyText,
+          replyTs, threadTs ?? ts, Date.now(), metadata, promptContext,
+        );
+      };
+
       try {
         await client.reactions.add({ channel, timestamp: ts, name: 'speech_balloon' });
       } catch { /* reaction may already exist */ }
 
       try {
-        const context = buildContext({
-          messagesDb: deps.messagesDb,
-          memory: deps.memory,
-          identity: deps.identity,
-          channel,
-          threadTs: threadTs ?? ts,
-          currentMessage: text,
-          userName,
-        });
+        const command = await handleMemoryCommand(deps.memory, text);
+        if (command) {
+          const replyResult = await client.chat.postMessage({
+            channel,
+            text: command.reply,
+            thread_ts: threadTs ?? ts,
+          });
+          saveAssistantReply(replyResult.ts ?? '', command.reply, null, null);
+        } else {
+          const context = buildContext({
+            messagesDb: deps.messagesDb,
+            memory: deps.memory,
+            identity: deps.identity,
+            assistantName,
+            channel,
+            threadTs: threadTs ?? ts,
+            currentMessage: text,
+            userName,
+          });
 
-        const response = await deps.llm.complete({
-          system: context.system,
-          messages: context.messages,
-        });
+          const response = await deps.llm.complete({
+            system: context.system,
+            messages: context.messages,
+          });
 
-        const replyResult = await client.chat.postMessage({
-          channel,
-          text: response.content,
-          thread_ts: threadTs ?? ts,
-        });
+          const replyResult = await client.chat.postMessage({
+            channel,
+            text: response.content,
+            thread_ts: threadTs ?? ts,
+          });
 
-        const replyTs = replyResult.ts ?? '';
-        const replyId = `${channel}:${replyTs}`;
-        const promptContext = JSON.stringify({
-          system: context.system,
-          messages: context.messages,
-        });
-        deps.messagesDb.prepare(`
-          INSERT OR REPLACE INTO messages (id, channel, channelName, user, userName, text, ts, threadTs, mentioned, receivedAt, llm_metadata, prompt_context)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
-        `).run(
-          replyId, channel, channelName, botUserId, 'forge-zima', response.content,
-          replyTs, threadTs ?? ts, Date.now(),
-          JSON.stringify({ model: response.model, inputTokens: response.inputTokens, outputTokens: response.outputTokens }),
-          promptContext,
-        );
+          const replyTs = replyResult.ts ?? '';
+          const promptContext = JSON.stringify({
+            system: context.system,
+            messages: context.messages,
+          });
+          saveAssistantReply(
+            replyTs,
+            response.content,
+            promptContext,
+            JSON.stringify({ model: response.model, inputTokens: response.inputTokens, outputTokens: response.outputTokens }),
+          );
+        }
       } catch (err) {
         console.error('[slack] Auto-reply error:', err);
       }

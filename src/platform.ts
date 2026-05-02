@@ -97,7 +97,7 @@ export class Platform {
         ``,
         `<!-- FIRST RUN: This is a starter template. Update this file to define who you are.`,
         `     What is your name? What are you responsible for? What can you do?`,
-        `     Example: "You are Ember, an AI agent managing a home network and Plex server." -->`,
+        `     Example: "You are ${name}, an AI agent managing a home network and Plex server." -->`,
       ].join('\n'),
       'SOUL.md': [
         `# Soul`,

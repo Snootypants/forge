@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import type { WebContext } from '../server.ts';
+import { handleMemoryCommand } from '../../slack/context.ts';
 
 export function messagesRoutes(ctx: WebContext): Router {
   const router = Router();
@@ -25,31 +26,54 @@ export function messagesRoutes(ctx: WebContext): Router {
       `).all(limit).reverse();
     }
 
-    res.json({ messages: rows });
+    res.json({ messages: rows, agentName: ctx.config.forge.name });
   });
 
   router.post('/', async (req, res) => {
-    const { content, agent } = req.body;
+    const { content } = req.body;
     if (!content) {
       res.status(400).json({ error: 'content required' });
       return;
     }
 
-    const context = buildSimpleContext(ctx, content);
+    const db = ctx.dbManager.get('messages');
+    const ts = Date.now().toString();
+
+    db.prepare(`
+      INSERT INTO messages (id, channel, channelName, user, userName, text, ts, receivedAt)
+      VALUES (?, 'web', 'web', 'user', ?, ?, ?, ?)
+    `).run(`web:user:${ts}`, ctx.config.user.name, content, ts, Date.now());
 
     try {
+      const command = await handleMemoryCommand(ctx.memory, content);
+      if (command) {
+        const replyTs = (Date.now() + 1).toString();
+        db.prepare(`
+          INSERT INTO messages (id, channel, channelName, user, userName, text, ts, threadTs, receivedAt)
+          VALUES (?, 'web', 'web', 'assistant', ?, ?, ?, ?, ?)
+        `).run(
+          `web:assistant:${replyTs}`,
+          ctx.config.forge.name,
+          command.reply,
+          replyTs,
+          ts,
+          Date.now(),
+        );
+
+        res.json({
+          reply: command.reply,
+          ts: replyTs,
+          agentName: ctx.config.forge.name,
+          memoryId: command.memoryId,
+        });
+        return;
+      }
+
+      const context = buildSimpleContext(ctx, content);
       const response = await ctx.llm.complete({
         system: context.system,
         messages: [{ role: 'user', content }],
       });
-
-      const ts = Date.now().toString();
-      const db = ctx.dbManager.get('messages');
-
-      db.prepare(`
-        INSERT INTO messages (id, channel, channelName, user, userName, text, ts, receivedAt)
-        VALUES (?, 'web', 'web', 'user', ?, ?, ?, ?)
-      `).run(`web:user:${ts}`, ctx.config.user.name, content, ts, Date.now());
 
       const replyTs = (Date.now() + 1).toString();
       const promptContext = JSON.stringify({
@@ -61,7 +85,7 @@ export function messagesRoutes(ctx: WebContext): Router {
         VALUES (?, 'web', 'web', 'assistant', ?, ?, ?, ?, ?, ?, ?)
       `).run(
         `web:assistant:${replyTs}`,
-        agent ?? 'forge-zima',
+        ctx.config.forge.name,
         response.content,
         replyTs,
         ts,
@@ -74,6 +98,7 @@ export function messagesRoutes(ctx: WebContext): Router {
         reply: response.content,
         model: response.model,
         ts: replyTs,
+        agentName: ctx.config.forge.name,
         usage: { input: response.inputTokens, output: response.outputTokens },
         prompt_context: promptContext,
       });

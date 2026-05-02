@@ -2,11 +2,11 @@ import { Router } from 'express';
 import type { WebContext } from '../server.ts';
 import { getAuthState, startClaudeOAuth, saveSlackTokens, saveOpenAIKey } from '../../auth/oauth.ts';
 
-export function authRoutes(_ctx: WebContext): Router {
+export function authRoutes(ctx: WebContext): Router {
   const router = Router();
 
   router.get('/status', (_req, res) => {
-    res.json(getAuthState());
+    res.json(getAuthState(ctx.config));
   });
 
   router.post('/claude/login', async (_req, res) => {
@@ -23,7 +23,7 @@ export function authRoutes(_ctx: WebContext): Router {
       res.status(400).json({ error: 'botToken and appToken required' });
       return;
     }
-    saveSlackTokens(botToken, appToken);
+    saveSlackTokens(botToken, appToken, undefined, ctx.config);
     res.json({ ok: true, status: 'saved' });
   });
 
@@ -33,7 +33,7 @@ export function authRoutes(_ctx: WebContext): Router {
       res.status(400).json({ error: 'apiKey required' });
       return;
     }
-    saveOpenAIKey(apiKey);
+    saveOpenAIKey(apiKey, undefined, ctx.config);
     res.json({ ok: true, status: 'saved' });
   });
 

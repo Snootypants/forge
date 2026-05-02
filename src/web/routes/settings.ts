@@ -11,7 +11,7 @@ interface StoredSettings {
 }
 
 function settingsPath(ctx: WebContext): string {
-  const logsDir = path.resolve(ctx.config.forge.root, ctx.config.paths.logs);
+  const logsDir = ctx.resolved.logs;
   fs.mkdirSync(logsDir, { recursive: true });
   return path.join(logsDir, 'settings.json');
 }

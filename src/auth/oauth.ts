@@ -1,5 +1,10 @@
-import { spawn, execSync } from 'node:child_process';
-import { saveEnvValue } from '../config.ts';
+import { spawn, execFileSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { resolveKey, saveEnvValue } from '../config.ts';
+import type { ForgeConfig, KeyRef } from '../types.ts';
+
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 export type AuthStatus = 'authenticated' | 'not_authenticated' | 'checking' | 'error';
 
@@ -9,12 +14,17 @@ export interface AuthState {
   openai: AuthStatus;
 }
 
-export function checkClaudeAuth(): AuthStatus {
+export function checkClaudeAuth(config?: ForgeConfig): AuthStatus {
+  if (resolveConfiguredKey(config?.api.anthropic, 'ANTHROPIC_API_KEY')) {
+    return 'authenticated';
+  }
+
   try {
-    const result = execSync('claude auth status', {
+    const result = execFileSync('claude', ['auth', 'status', '--json'], {
       encoding: 'utf-8',
       timeout: 5000,
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: claudeEnv(),
     });
     const status = JSON.parse(result);
     return status.loggedIn ? 'authenticated' : 'not_authenticated';
@@ -23,23 +33,23 @@ export function checkClaudeAuth(): AuthStatus {
   }
 }
 
-export function checkSlackAuth(): AuthStatus {
-  const botToken = process.env.SLACK_BOT_TOKEN;
-  const appToken = process.env.SLACK_APP_TOKEN;
+export function checkSlackAuth(config?: ForgeConfig): AuthStatus {
+  const botToken = resolveConfiguredKey(config?.api.slack?.bot_token, 'SLACK_BOT_TOKEN');
+  const appToken = resolveConfiguredKey(config?.api.slack?.app_token, 'SLACK_APP_TOKEN');
   if (botToken && appToken) return 'authenticated';
   return 'not_authenticated';
 }
 
-export function checkOpenAIAuth(): AuthStatus {
-  if (process.env.OPENAI_API_KEY) return 'authenticated';
+export function checkOpenAIAuth(config?: ForgeConfig): AuthStatus {
+  if (resolveConfiguredKey(config?.api.openai, 'OPENAI_API_KEY')) return 'authenticated';
   return 'not_authenticated';
 }
 
-export function getAuthState(): AuthState {
+export function getAuthState(config?: ForgeConfig): AuthState {
   return {
-    claude: checkClaudeAuth(),
-    slack: checkSlackAuth(),
-    openai: checkOpenAIAuth(),
+    claude: checkClaudeAuth(config),
+    slack: checkSlackAuth(config),
+    openai: checkOpenAIAuth(config),
   };
 }
 
@@ -47,7 +57,7 @@ export function startClaudeOAuth(): Promise<{ success: boolean; error?: string }
   return new Promise((resolve) => {
     const child = spawn('claude', ['auth', 'login'], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: claudeEnv(),
     });
 
     let stderr = '';
@@ -72,14 +82,27 @@ export function startClaudeOAuth(): Promise<{ success: boolean; error?: string }
   });
 }
 
-export function saveSlackTokens(botToken: string, appToken: string, envPath?: string): void {
-  saveEnvValue('SLACK_BOT_TOKEN', botToken, envPath);
-  saveEnvValue('SLACK_APP_TOKEN', appToken, envPath);
-  process.env.SLACK_BOT_TOKEN = botToken;
-  process.env.SLACK_APP_TOKEN = appToken;
+export function saveSlackTokens(botToken: string, appToken: string, envPath?: string, config?: ForgeConfig): void {
+  saveToken(config?.api.slack?.bot_token?.env ?? 'SLACK_BOT_TOKEN', botToken, envPath);
+  saveToken(config?.api.slack?.app_token?.env ?? 'SLACK_APP_TOKEN', appToken, envPath);
 }
 
-export function saveOpenAIKey(apiKey: string, envPath?: string): void {
-  saveEnvValue('OPENAI_API_KEY', apiKey, envPath);
-  process.env.OPENAI_API_KEY = apiKey;
+export function saveOpenAIKey(apiKey: string, envPath?: string, config?: ForgeConfig): void {
+  saveToken(config?.api.openai?.env ?? 'OPENAI_API_KEY', apiKey, envPath);
+}
+
+function resolveConfiguredKey(ref: KeyRef | undefined, fallbackEnv: string): string | null {
+  return resolveKey(ref) ?? process.env[fallbackEnv] ?? null;
+}
+
+function saveToken(envName: string, value: string, envPath?: string): void {
+  saveEnvValue(envName, value, envPath);
+  process.env[envName] = value;
+}
+
+function claudeEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    PATH: [path.join(PROJECT_ROOT, 'node_modules', '.bin'), process.env.PATH].filter(Boolean).join(path.delimiter),
+  };
 }
