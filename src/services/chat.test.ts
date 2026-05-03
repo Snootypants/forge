@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildContext, handleMemoryCommand } from './context.ts';
-import type { MemoryService } from '../services/memory.ts';
+import { buildChatContext, handleMemoryCommand } from './chat.ts';
+import type { MemoryService } from './memory.ts';
 
 function fakeMemory(): MemoryService {
   const state = {
@@ -47,7 +47,7 @@ test('handleMemoryCommand forgets only by exact memory id', async () => {
   assert.equal(await handleMemoryCommand(memory, 'please remember this generally'), null);
 });
 
-test('buildContext treats configured assistant name as assistant role', () => {
+test('buildChatContext treats configured assistant name as assistant role', () => {
   let call = 0;
   const messagesDb = {
     prepare() {
@@ -66,7 +66,7 @@ test('buildContext treats configured assistant name as assistant role', () => {
     },
   };
 
-  const context = buildContext({
+  const context = buildChatContext({
     messagesDb: messagesDb as never,
     memory: fakeMemory(),
     identity: 'You are forge.',
@@ -75,6 +75,7 @@ test('buildContext treats configured assistant name as assistant role', () => {
     threadTs: '1',
     currentMessage: 'Current message',
     userName: 'Caleb',
+    now: new Date('2026-05-02T00:00:00.000Z'),
   });
 
   assert.equal(context.messages[0].role, 'assistant');

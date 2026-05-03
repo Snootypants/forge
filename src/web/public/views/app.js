@@ -5,22 +5,38 @@ const API = '';
 let authToken = '';
 
 export async function api(path, opts = {}) {
-  const headers = { 'Content-Type': 'application/json' };
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
   const res = await fetch(`${API}${path}`, { credentials: 'same-origin', ...opts, headers });
+  const data = await readResponse(res);
   if (res.status === 401) {
     showLogin();
-    throw new Error('Unauthorized');
+    throw new Error(errorMessage(data) || 'Unauthorized');
   }
-  return res.json();
+  if (!res.ok) throw new Error(errorMessage(data) || `${res.status} ${res.statusText}`.trim());
+  return data;
 }
 
 export function toast(msg, type = 'success') {
   const el = document.createElement('div');
-  el.className = `toast ${type}`;
+  el.className = `toast ${type === 'error' ? 'error' : 'success'}`;
   el.textContent = msg;
+  el.setAttribute('role', 'status');
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 3000);
+}
+
+async function readResponse(res) {
+  const text = await res.text();
+  if (!text) return null;
+  try { return JSON.parse(text); }
+  catch { return text; }
+}
+
+function errorMessage(data) {
+  if (!data) return '';
+  if (typeof data === 'string') return data;
+  return data.error || data.message || data.detail || '';
 }
 
 function updateStatus(connected) {
@@ -86,17 +102,52 @@ async function loadPublicInfo() {
   }
 }
 
-let activeTab = localStorage.getItem('forge_tab') || 'chat';
+const TABS = ['chat', 'settings'];
+const isValidTab = (tab) => TABS.includes(tab);
+
+function storedTab() {
+  try {
+    const tab = localStorage.getItem('forge_tab');
+    return isValidTab(tab) ? tab : 'chat';
+  } catch {
+    return 'chat';
+  }
+}
+
+let activeTab = storedTab();
 
 document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab, true));
+  btn.addEventListener('keydown', (e) => {
+    const buttons = [...document.querySelectorAll('.tab-btn')];
+    const idx = buttons.indexOf(btn);
+    let next = null;
+    if (e.key === 'ArrowRight') next = buttons[(idx + 1) % buttons.length];
+    if (e.key === 'ArrowLeft') next = buttons[(idx - 1 + buttons.length) % buttons.length];
+    if (e.key === 'Home') next = buttons[0];
+    if (e.key === 'End') next = buttons[buttons.length - 1];
+    if (!next) return;
+    e.preventDefault();
+    switchTab(next.dataset.tab, true);
+  });
 });
 
-function switchTab(tab) {
+function switchTab(tab, focus = false) {
+  if (!isValidTab(tab)) tab = 'chat';
   activeTab = tab;
-  localStorage.setItem('forge_tab', tab);
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === `tab-${tab}`));
+  try { localStorage.setItem('forge_tab', tab); } catch { /* storage is optional */ }
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    const selected = b.dataset.tab === tab;
+    b.classList.toggle('active', selected);
+    b.setAttribute('aria-selected', String(selected));
+    b.tabIndex = selected ? 0 : -1;
+    if (selected && focus) b.focus();
+  });
+  document.querySelectorAll('.tab-content').forEach(t => {
+    const selected = t.id === `tab-${tab}`;
+    t.classList.toggle('active', selected);
+    t.hidden = !selected;
+  });
   if (tab === 'settings') initSettings(api, toast);
 }
 

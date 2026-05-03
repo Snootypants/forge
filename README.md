@@ -2,9 +2,9 @@
 
 # forge
 
-Self-hosted AI agents with long-term memory that actually works.
+Self-hosted memory and chat infrastructure for building personal AI agents.
 
-**99% retrieval accuracy on [LongMemEval](https://arxiv.org/abs/2410.10813). 95.6% on [LOCOMO](https://arxiv.org/abs/2402.17753). No GPU, no vector database, no embedding pipeline.** Just SQLite FTS5 running on whatever hardware you have lying around.
+**99% retrieval hit rate on [LongMemEval](https://arxiv.org/abs/2410.10813). 95.6% on [LOCOMO](https://arxiv.org/abs/2402.17753). No GPU, no vector database, no embedding pipeline.** Just SQLite FTS5 running on whatever hardware you have lying around.
 
 ```
 ━━━ LongMemEval (500 entries) ━━━        ━━━ LOCOMO (1986 questions) ━━━
@@ -17,27 +17,43 @@ Time:      6.4s                           Time:      0.7s
 
 Most agent memory systems are either cloud-locked SaaS, require a stack of infrastructure (Postgres, vector DB, embedding service), or just don't work well enough to trust with real context.
 
-Forge is different: a single-process platform that runs on a NAS, a Raspberry Pi, or a retired laptop plugged into your router. The memory system is benchmarked against published academic evals — not "it feels like it works" but actual hit rates on thousands of retrieval challenges. It scores 99% using only SQLite full-text search, which means your agent's memory works without any external API calls, without internet access, and without burning money on embeddings.
+Forge is different: a single-process platform that runs on a NAS, a Raspberry Pi, or a retired laptop plugged into your router. The memory retrieval harness is benchmarked against published academic evals — not "it feels like it works" but actual hit rates on thousands of retrieval challenges. It scores 99% using only SQLite full-text search, which means retrieved context works without any external API calls, without internet access, and without burning money on embeddings.
 
-The whole thing is ~2100 lines of TypeScript. One directory, one config file, one process.
+The core is intentionally small. One directory, one config file, one process.
+
+## Current Stance
+
+Forge is not trying to be one more all-in-one hosted agent product. It is the base layer: memory, identity, chat surfaces, provider selection, and local persistence. The user decides what the agent is allowed to do on top of that base.
+
+That distinction matters. Claude, Codex, OpenAI, Anthropic, and later local models are providers behind the same interface. Forge should not be conceptually tied to any single model vendor or CLI.
+
+The current runtime is usable, but still hardening-stage software. It is good enough for personal infrastructure and active development; the remaining work is around migrations, runtime settings truth, Slack trust policy, Docker defaults, and deeper chat/context parity.
 
 ## What I Actually Use This For
 
-I run an instance called Ember on a 2012 MacBook Pro plugged into my home network. She manages Plex, handles file operations, monitors the local network, and talks to me over Slack. When I tell her something — a preference, a project detail, a correction — she remembers it across sessions, across days, because the memory system actually retrieves the right context. I can spin up a second agent for my wife by copying the folder and changing the config. It's my personal infrastructure, not a demo.
+I run an instance called Ember on local hardware plugged into my home network. Forge gives her persistent memory, identity, a web chat surface, and Slack access. Provider CLIs or APIs supply the model. Anything more powerful, such as file operations, network actions, or media management, is something the user deliberately layers on through their chosen provider and local setup.
 
 ## What This Is
 
-A complete agent hosting platform. One directory, one config, one process — runs on anything with Node 22. Designed for low-power hardware: NAS boxes, old laptops, mini-PCs, Docker containers.
+A portable foundation for self-hosted agents. One directory, one config, one process — runs on anything with Node 22. Designed for low-power hardware: NAS boxes, old laptops, mini-PCs, Docker containers.
 
 Each instance is a self-contained agent with:
 - Long-term memory (FTS5 + optional vector search)
-- Claude LLM via OAuth (no raw API keys — Claude Code SDK)
+- Provider-backed LLM runtime: Claude CLI, Codex CLI, OpenAI API, or Anthropic API
 - Slack integration (Bolt Socket Mode)
 - Web UI (chat + settings)
-- 8 SQLite databases covering the full agent lifecycle
+- SQLite-backed memory, message history, and lifecycle schemas
 - Three-file identity system (who the agent is, how it behaves, who it serves)
 
-Want another agent? Copy the folder, change the config, start it on a different port.
+Want another agent? Copy the folder, change the config, start it on a different port. Each instance can have its own identity, memory, provider, model, and permission posture.
+
+## What This Is Not
+
+- Not a SaaS agent runtime.
+- Not a hosted model provider.
+- Not a promise that every provider is sandboxed the same way.
+- Not yet a polished public release with migrations and every settings control fully wired.
+- Not a replacement for user judgment about CLI permissions, local tools, or deployment exposure.
 
 ## How It Compares
 
@@ -46,13 +62,13 @@ Want another agent? Copy the folder, change the config, start it on a different 
 | LongMemEval hit rate | **99.0%** | ~75% (episodic recall) | — |
 | LOCOMO hit rate | **95.6%** | — | ~91% (claimed) |
 | Multi-hop reasoning | 75.0% | — | — |
-| External services needed | None | PostgreSQL + vector DB | Cloud API |
+| External services needed | None for memory; LLM provider for chat | PostgreSQL + vector DB | Cloud API |
 | Embedding API required | No (optional) | Yes | Yes |
 | Query latency (500 memories) | **0.4ms** | ~200ms | ~500ms |
 | Deployment | Single process, SQLite | Multi-service | SaaS / self-host |
-| Auth model | OAuth (no raw keys) | API key | API key |
+| Auth model | Provider-specific: CLI login or API key refs | API key | API key |
 
-forge achieves 99% retrieval accuracy with zero external dependencies. The optional vector search (OpenAI embeddings) improves MRR and rescues semantic edge cases but isn't required.
+forge achieves 99% retrieval hit rate with zero external dependencies in the checked-in eval harness. The optional vector search (OpenAI embeddings) improves MRR and rescues semantic edge cases but isn't required.
 
 ## The Memory Thesis
 
@@ -126,7 +142,7 @@ Datasets: [LongMemEval repo](https://github.com/xiaowu0162/LongMemEval), [LOCOMO
 │  │           │                                           │  │
 │  │  ┌────────┴────────┐  ┌──────────┐  ┌────────────┐   │  │
 │  │  │  MemoryService  │  │   LLM    │  │   Embed    │   │  │
-│  │  │  (FTS5 + vec)   │  │  (OAuth) │  │  (OpenAI)  │   │  │
+│  │  │  (FTS5 + vec)   │  │ Provider │  │  (OpenAI)  │   │  │
 │  │  └─────────────────┘  └──────────┘  └────────────┘   │  │
 │  └───────────────────────────────────────────────────────┘  │
 │                                                             │
@@ -140,15 +156,13 @@ Datasets: [LongMemEval repo](https://github.com/xiaowu0162/LongMemEval), [LOCOMO
 │  └───────────────────────────────────────────────────────┘  │
 │                                                             │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │  SQLite Databases (8)                                 │  │
+│  │  SQLite Databases (6 core)                            │  │
 │  │                                                       │  │
-│  │  memory.db ── memories + FTS5 index + vec0 vectors    │  │
-│  │  messages.db ── message history + annotations         │  │
+│  │  memory.db ── durable memories + FTS5 + vec0          │  │
+│  │  messages.db ── chat surface messages + annotations   │  │
 │  │  all.db ── documents + chunks + FTS5                  │  │
-│  │  anvil.db ── jobs, budgets, agent runs                │  │
-│  │  agent-events.db ── conversations, retrieval runs     │  │
-│  │  chat-history.db ── conversation threads              │  │
-│  │  knowledge.db ── knowledge base entries               │  │
+│  │  chat-history.db ── durable conversation capture      │  │
+│  │  notepad.db ── topic notes, tags, pinned notes        │  │
 │  │  logs.db ── issues + occurrences                      │  │
 │  └───────────────────────────────────────────────────────┘  │
 │                                                             │
@@ -161,14 +175,14 @@ Datasets: [LongMemEval repo](https://github.com/xiaowu0162/LongMemEval), [LOCOMO
 └─────────────────────────────────────────────────────────────┘
 ```
 
-~2100 lines of TypeScript. Single process. Zero external services required (everything optional degrades gracefully).
+Single process. SQLite for state. External services are optional except for whichever LLM provider you choose.
 
 ## Installation
 
 ### Prerequisites
 
-- Node.js 22+ (minimum — 24 LTS or later recommended)
-- Claude Code CLI (`npm install -g @anthropic-ai/claude-code`)
+- Node.js 22.6+ (Node 22 LTS is the supported runtime line; `.nvmrc` pins this repo to Node 22)
+- One LLM provider: Claude Code CLI, Codex CLI, OpenAI API, or Anthropic API
 - Git
 
 ### Quick Start
@@ -176,7 +190,15 @@ Datasets: [LongMemEval repo](https://github.com/xiaowu0162/LongMemEval), [LOCOMO
 ```bash
 git clone https://github.com/Snootypants/forge.git
 cd forge
-npm install
+npm ci
+```
+
+### Build
+
+```bash
+npm run typecheck   # TypeScript validation only
+npm run build       # Typecheck, then emit dist/
+npm run start:dist  # Run the compiled release artifact
 ```
 
 ### First Run
@@ -186,25 +208,37 @@ npm start
 ```
 
 On first boot:
-1. Creates all 8 SQLite databases in `./dbs/`
-2. Generates a web auth token, saves it under `./logs/`, and prints it once
-3. Starts the web UI on `http://0.0.0.0:6800`
+1. Creates SQLite databases in `./dbs/`
+2. Generates a web auth token and saves it under `./logs/` if one is not configured
+3. Starts the web UI on `http://127.0.0.1:6800` by default
 4. Skips Slack if no tokens are configured (normal)
 
 Open the web UI and configure auth via the Settings tab.
 
 ### Authentication Setup
 
-#### Claude (required for LLM features)
+#### LLM Provider
 
-Forge prefers Claude Code's OAuth for Claude access. You can also point `api.anthropic` at an environment variable when you intentionally want API-key auth.
+Forge is provider-backed. The default provider is `claude-cli`, but `codex-cli`, `openai-api`, and `anthropic-api` are also supported through the same chat/memory surface.
 
-From the Settings UI, click **"Authenticate Claude"** — this spawns `claude auth login` which opens a browser for the OAuth flow. Once authenticated, the credential lives in `~/.claude/` and the SDK handles refresh.
+For Claude CLI, Forge prefers Claude Code's OAuth. You can also point `api.anthropic` at an environment variable when you intentionally want API-key auth.
+
+From the Settings UI, click **"Authenticate Claude"** — this spawns `claude auth login` which opens a browser for the OAuth flow. Once authenticated, the credential lives in `~/.claude/` and the Claude CLI handles refresh.
 
 Or from terminal:
 ```bash
 claude auth login
 ```
+
+For Codex CLI, authenticate the installed Codex CLI separately:
+
+```bash
+codex login
+```
+
+For API providers, set the matching key ref in `.env` or `forge.config.yaml`.
+
+The selected provider is configured under `llm:`. CLI providers can run in `permission_mode: default` or `permission_mode: yolo`. `yolo` intentionally maps to the provider's full-power/no-sandbox mode where supported.
 
 #### OpenAI (optional — enables vector search)
 
@@ -252,25 +286,34 @@ user:
 
 api:
   anthropic:
-    env: ANTHROPIC_API_KEY    # managed by OAuth — don't set manually
+    env: ANTHROPIC_API_KEY    # optional API-key fallback / anthropic-api provider
   openai:
-    env: OPENAI_API_KEY       # read from .env
+    env: OPENAI_API_KEY       # embeddings, openai-api provider, or Codex CLI env fallback
   slack:
     bot_token:
       env: SLACK_BOT_TOKEN
     app_token:
       env: SLACK_APP_TOKEN
-    # bot_user_id and channels are optional — leave empty for defaults.
+    # bot_user_id and channels are optional.
     # bot_user_id is auto-detected on Slack connect.
-    # channels: [] means the bot responds in ALL channels it's invited to.
-    # Set channels: ["C0123ABC"] to restrict to specific channel IDs.
+    # By default Slack responds only in DMs or configured channel mentions.
+    # Set channels: ["C0123ABC"] to allow a channel ID.
+    # Set allow_all_channels: true only when every invited channel is trusted.
     bot_user_id: ""
     channels: []
+    allow_all_channels: false
+    require_mention: true
+    allow_yolo: false
 
 models:
   default: claude-sonnet-4-6    # daily driver
   architect: claude-opus-4-6    # complex reasoning
   sentinel: claude-haiku-4-5    # fast classification
+
+llm:
+  provider: claude-cli          # claude-cli | codex-cli | openai-api | anthropic-api
+  model: claude-sonnet-4-6      # set a provider-appropriate model
+  permission_mode: default      # default | yolo; CLI providers only
 
 paths:
   dbs: ./dbs
@@ -280,7 +323,9 @@ paths:
 services:
   web:
     port: 6800
+    host: 127.0.0.1
     context_window_tokens: 80000
+    debug_prompt_context: false
     # Optional. If omitted, forge uses FORGE_AUTH_TOKEN or a generated token
     # persisted in the resolved logs directory.
     # auth_token: "change-me"
@@ -299,7 +344,7 @@ budget:
 
 API keys can use `env:` references — they're read from environment variables or `.env` at runtime. Nothing sensitive lives in this file unless you intentionally set inline `value:` entries or `services.web.auth_token`.
 
-Web auth token precedence is: `FORGE_AUTH_TOKEN`, then `services.web.auth_token`, then the persisted token file in the resolved logs directory. If none exists, forge generates a 32-byte token, writes it with `0600` permissions, and prints it during startup.
+Web auth token precedence is: `FORGE_AUTH_TOKEN`, then `services.web.auth_token`, then the persisted token file in the resolved logs directory. If none exists, forge generates a 32-byte token and writes it with `0600` permissions. Startup logs show the saved path, not the token value.
 
 ## Identity
 
@@ -311,7 +356,7 @@ The `identity/` directory (gitignored) contains three files that define your age
 
 **`USER.md`** — who the agent serves. The user's role, preferences, context the agent needs to work effectively.
 
-All three are loaded at boot (in that order) and injected as the system prompt for every LLM call. They're gitignored because each deployment is unique — the same codebase can host completely different agents.
+All three are loaded in that order and injected as the system prompt for every LLM call. Web identity edits are reloaded for subsequent web chat turns. They're gitignored because each deployment is unique — the same codebase can host completely different agents.
 
 On first run, forge generates starter templates for all three files. `USER.md` ships with a prompt telling the agent to ask the user about themselves and fill it out — the agent bootstraps its own context through conversation.
 
@@ -368,10 +413,11 @@ After=network.target
 Type=simple
 User=agent
 WorkingDirectory=/home/agent/agents/%i
-ExecStart=/home/agent/.nvm/versions/node/v22/bin/node --experimental-strip-types src/index.ts
+ExecStart=/home/agent/.nvm/versions/node/v22/bin/node dist/index.js --config /home/agent/agents/%i/forge.config.yaml
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
+Environment=FORGE_WEB_HOST=127.0.0.1
 
 [Install]
 WantedBy=multi-user.target
@@ -384,29 +430,47 @@ sudo systemctl start forge@ember
 
 ### Running in Docker
 
-```dockerfile
-FROM node:22-slim
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --omit=dev
-COPY . .
-RUN mkdir -p dbs logs
-EXPOSE 6800
-CMD ["node", "--experimental-strip-types", "src/index.ts"]
+```bash
+docker build -t forge .
 ```
 
 ```bash
+docker volume create forge-dbs forge-identity forge-logs
+
 docker run -d \
   --name ember \
   -p 6800:6800 \
-  -v ./dbs:/app/dbs \
-  -v ./identity:/app/identity \
-  -v ./logs:/app/logs \
+  --mount type=bind,src="$(pwd)/forge.config.yaml",dst=/config/forge.config.yaml,readonly \
+  --mount type=volume,src=forge-dbs,dst=/app/dbs \
+  --mount type=volume,src=forge-identity,dst=/app/identity \
+  --mount type=volume,src=forge-logs,dst=/app/logs \
   --env-file .env \
   forge
 ```
 
-Mount `dbs/` and `identity/` as volumes so state persists across container rebuilds.
+The image builds `dist/` in a build stage and runs `node dist/index.js` with production dependencies only. It does not copy `forge.config.yaml`; mount the runtime config at `/config/forge.config.yaml`. Keep secrets in `.env` or in provider-owned CLI auth stores, and keep config key references as `env:` entries instead of inline key values.
+
+`.dockerignore` excludes local databases, identity files, logs, `.env*`, `forge.config.yaml`, Claude credentials, editor files, and eval datasets so local state and secrets are not sent to the Docker build context.
+
+Use named volumes for `dbs/`, `identity/`, and `logs/` so state, identity, and the generated web auth token persist across container rebuilds without host ownership surprises. If you intentionally bind-mount host directories instead, create them first and make them writable by the container user, which is UID/GID `1000:1000` in the base Node image:
+
+```bash
+mkdir -p dbs identity logs
+sudo chown -R 1000:1000 dbs identity logs
+```
+
+The image sets `FORGE_CONFIG=/config/forge.config.yaml` and `FORGE_WEB_HOST=0.0.0.0` so a mounted config and `-p 6800:6800` work; local bare-metal runs still default to `127.0.0.1`.
+
+### Health and Readiness
+
+Forge exposes unauthenticated liveness and readiness endpoints for local supervisors and container health checks:
+
+```bash
+curl http://127.0.0.1:6800/healthz
+curl http://127.0.0.1:6800/readyz
+```
+
+`/healthz` returns process liveness. `/readyz` checks opened SQLite handles and returns only `{ "ok": true }` or `503` with `{ "ok": false }`. Detailed database health is available through the authenticated Settings API.
 
 ## Memory API
 
@@ -470,7 +534,7 @@ active ──→ superseded (replaced by newer memory, pointer maintained)
    └────→ archived (no longer relevant, but kept for history)
 ```
 
-Memories are never deleted in normal operation — they transition states. The full mutation history is preserved in `memory_history`.
+`supersede()` preserves lifecycle history by marking the old memory and pointing it at the replacement. The current `/forget` command removes a memory from active storage and records delete history; changing `/forget` to archive instead of delete is on the hardening backlog.
 
 ### Write Policy
 
@@ -500,16 +564,17 @@ What to save as memories:
 ### The Conversation Cycle
 
 ```
-Message in → Search memory → Build context → LLM response → Save what matters
+Message in → Search memory → Build context → LLM response
 ```
 
 On every incoming message (Slack or web), forge:
 
 1. **Searches memory** using the message as the query
-2. **Builds context** — identity + retrieved memories + thread history
-3. **Sends to Claude** via the Claude Code SDK (OAuth, no raw key)
+2. **Builds context** — identity + retrieved memories + available chat thread context
+3. **Sends to the selected LLM provider**
 4. **Responds** in the same channel/thread
-5. **Saves** meaningful information back as memories
+
+Memory writes are currently explicit: use `/remember ...` in Slack or web chat to save a memory, and `/forget <memory-id>` to remove one. Automatic memory extraction/writeback and archive-first forgetting are planned runtime features, not active behavior.
 
 ### FTS5 Search
 
@@ -537,71 +602,51 @@ We tested it. Pure vector search scores ~90% on LongMemEval. FTS5 alone scores 9
 
 Vectors help with the 1% where keywords fail: "recommend publications I'd find interesting" when the memory says "researches machine learning at Stanford." No keyword overlap, but semantically connected. That's where hybrid earns its keep.
 
-## Adding Tools
+## LLM Providers
 
-The LLM service wraps the Claude Code SDK, which supports tool use natively. Tools extend what the agent can do beyond conversation — file access, API calls, system commands.
+The runtime calls a provider through `LLMService`; web and Slack do not know whether the backend is Claude CLI, Codex CLI, OpenAI API, or Anthropic API.
 
-### Defining Tools
+Supported providers:
 
-Tools are defined as JSON schemas and passed to the SDK at query time. The SDK handles the tool-use loop (Claude requests a tool call → you execute it → return results → Claude continues):
+| Provider | Path | Notes |
+| --- | --- | --- |
+| `claude-cli` | local subprocess | Uses `claude --print --output-format json`; `permission_mode: yolo` maps to Claude `bypassPermissions`. |
+| `codex-cli` | local subprocess | Uses `codex exec`; `permission_mode: yolo` maps to `--dangerously-bypass-approvals-and-sandbox`. |
+| `openai-api` | HTTPS API | Uses OpenAI Responses API; `permission_mode` does not apply. |
+| `anthropic-api` | HTTPS API | Uses Anthropic Messages API; `permission_mode` does not apply. |
 
-```typescript
-import { query } from '@anthropic-ai/claude-code';
+CLI providers may inherit local tool capabilities from their own CLIs and config. Forge makes that explicit through `permission_mode`; the user chooses the power/risk profile. Slack is conservative by default: DMs are allowed, channel replies require an explicit channel allowlist or `allow_all_channels`, channel mentions are required unless `require_mention: false`, and yolo-mode Slack replies require `allow_yolo: true`.
 
-const tools = [
-  {
-    name: 'check_server_status',
-    description: 'Check if a server on the local network is responding',
-    input_schema: {
-      type: 'object',
-      properties: {
-        hostname: { type: 'string', description: 'Hostname or IP to check' },
-        port: { type: 'number', description: 'Port number (default 80)' },
-      },
-      required: ['hostname'],
-    },
-  },
-];
+Forge does not yet expose a JSON-schema tool registry or SDK tool loop.
 
-const messages = await query({
-  prompt: userMessage,
-  systemPrompt: identity,
-  tools,
-  toolHandler: async (toolName, input) => {
-    if (toolName === 'check_server_status') {
-      // Execute the tool and return result
-      const alive = await ping(input.hostname, input.port ?? 80);
-      return { status: alive ? 'up' : 'down', hostname: input.hostname };
-    }
-    return { error: 'Unknown tool' };
-  },
-});
+### Provider Stance
+
+Forge owns the stable substrate:
+
+- memory retrieval and storage
+- identity files
+- web and Slack chat surfaces
+- message persistence
+- provider selection and normalized responses
+
+Providers own model behavior:
+
+- model choice
+- CLI vs API execution
+- local tool access
+- sandbox/permission behavior
+- token usage reporting
+
+That boundary is deliberate. Forge should stay useful whether the user prefers Claude, Codex, OpenAI API, Anthropic API, or a future local provider.
+
+Built-in memory commands are handled before the LLM call:
+
+```text
+/remember The user prefers dark roast coffee.
+/forget <memory-id>
 ```
 
-### Tool Patterns
-
-**System tools** — network checks, file operations, process management:
-```typescript
-{ name: 'run_command', description: 'Execute a shell command on the host' }
-{ name: 'read_file', description: 'Read a file from the filesystem' }
-{ name: 'list_network_devices', description: 'Scan local network for active devices' }
-```
-
-**Memory tools** — let the agent manage its own memory:
-```typescript
-{ name: 'remember', description: 'Save something important to long-term memory' }
-{ name: 'recall', description: 'Search memory for relevant context' }
-{ name: 'forget', description: 'Archive or supersede an outdated memory' }
-```
-
-**Integration tools** — connect to external services:
-```typescript
-{ name: 'plex_search', description: 'Search the Plex media library' }
-{ name: 'home_assistant', description: 'Control smart home devices' }
-{ name: 'send_notification', description: 'Send a push notification' }
-```
-
-Tools are registered per-agent via the identity or a tools config file. Each forge instance can have a completely different toolset — one agent manages media, another handles network ops, another does research.
+Host tools such as shell commands, file operations, network checks, and third-party integrations should be added deliberately behind a scoped service boundary. User-facing Slack and web chat should not run with broad local tool permissions.
 
 ## Integrating With Other Systems
 
@@ -688,13 +733,14 @@ forge/
 │   ├── config.ts             # YAML config loader + .env management
 │   ├── types.ts              # Zod schemas + TypeScript types
 │   ├── auth/
-│   │   └── oauth.ts          # Claude OAuth, Slack/OpenAI key management
+│   │   └── oauth.ts          # provider, Slack, and OpenAI key helpers
 │   ├── db/
-│   │   ├── manager.ts        # opens/closes all 8 databases
-│   │   └── schemas/          # 8 SQL schema files
+│   │   ├── manager.ts        # opens/closes core runtime databases
+│   │   └── schemas/          # SQL schema files
 │   ├── services/
 │   │   ├── memory.ts         # FTS5 + hybrid search + lifecycle
-│   │   ├── llm.ts            # Claude Code SDK wrapper (OAuth)
+│   │   ├── llm.ts            # provider-backed LLM service
+│   │   ├── llm/              # Claude CLI, Codex CLI, OpenAI API, Anthropic API providers
 │   │   └── embed.ts          # OpenAI embeddings + TPM throttling
 │   ├── slack/
 │   │   ├── listener.ts       # Bolt Socket Mode + thread queuing
@@ -716,7 +762,7 @@ forge/
 
 ## Security Model
 
-- **No raw API keys in code** — prefer Claude OAuth and `env:` key refs; keep raw keys in `.env` with `chmod 600`
+- **No raw API keys in code** — prefer provider login or `env:` key refs; keep raw keys in `.env` with `chmod 600`
 - **Web UI auth** — bearer token (generated on first boot) or HttpOnly cookie, timing-safe comparison
 - **Identity files gitignored** — agent personality and user context never leave the box
 - **Database files gitignored** — all runtime state stays local

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveKey, saveEnvValue } from '../config.ts';
 import type { ForgeConfig, KeyRef } from '../types.ts';
+import { getLLMProviderRequirements, sanitizeProviderError, type ProviderAuthRequirement } from '../services/llm/shared.ts';
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -10,8 +11,18 @@ export type AuthStatus = 'authenticated' | 'not_authenticated' | 'checking' | 'e
 
 export interface AuthState {
   claude: AuthStatus;
+  anthropic: AuthStatus;
   slack: AuthStatus;
   openai: AuthStatus;
+  selectedProvider: ForgeConfig['llm']['provider'];
+  providers: ProviderAuthStatus[];
+}
+
+export interface ProviderAuthStatus {
+  provider: ForgeConfig['llm']['provider'];
+  label: string;
+  requirement: ProviderAuthRequirement;
+  status: AuthStatus;
 }
 
 export function checkClaudeAuth(config?: ForgeConfig): AuthStatus {
@@ -40,16 +51,28 @@ export function checkSlackAuth(config?: ForgeConfig): AuthStatus {
   return 'not_authenticated';
 }
 
+export function checkAnthropicAuth(config?: ForgeConfig): AuthStatus {
+  if (resolveConfiguredKey(config?.api.anthropic, 'ANTHROPIC_API_KEY')) return 'authenticated';
+  return 'not_authenticated';
+}
+
 export function checkOpenAIAuth(config?: ForgeConfig): AuthStatus {
   if (resolveConfiguredKey(config?.api.openai, 'OPENAI_API_KEY')) return 'authenticated';
   return 'not_authenticated';
 }
 
 export function getAuthState(config?: ForgeConfig): AuthState {
+  const claude = checkClaudeAuth(config);
+  const anthropic = checkAnthropicAuth(config);
+  const openai = checkOpenAIAuth(config);
+  const selectedProvider = config?.llm.provider ?? 'claude-cli';
   return {
-    claude: checkClaudeAuth(config),
+    claude,
+    anthropic,
     slack: checkSlackAuth(config),
-    openai: checkOpenAIAuth(config),
+    openai,
+    selectedProvider,
+    providers: getProviderAuthStatuses(config, { claude, anthropic, openai }),
   };
 }
 
@@ -67,12 +90,12 @@ export function startClaudeOAuth(): Promise<{ success: boolean; error?: string }
       if (code === 0) {
         resolve({ success: true });
       } else {
-        resolve({ success: false, error: stderr || `Exit code ${code}` });
+        resolve({ success: false, error: sanitizeProviderError(stderr || `Exit code ${code}`) });
       }
     });
 
     child.on('error', (err) => {
-      resolve({ success: false, error: err.message });
+      resolve({ success: false, error: sanitizeProviderError(err) });
     });
 
     setTimeout(() => {
@@ -91,6 +114,44 @@ export function saveOpenAIKey(apiKey: string, envPath?: string, config?: ForgeCo
   saveToken(config?.api.openai?.env ?? 'OPENAI_API_KEY', apiKey, envPath);
 }
 
+export function saveAnthropicKey(apiKey: string, envPath?: string, config?: ForgeConfig): void {
+  saveToken(config?.api.anthropic?.env ?? 'ANTHROPIC_API_KEY', apiKey, envPath);
+}
+
+function getProviderAuthStatuses(
+  config: ForgeConfig | undefined,
+  statuses: { claude: AuthStatus; anthropic: AuthStatus; openai: AuthStatus },
+): ProviderAuthStatus[] {
+  if (!config) {
+    return [];
+  }
+
+  return getLLMProviderRequirements(config).providers.map(provider => ({
+    provider: provider.provider,
+    label: provider.label,
+    requirement: provider.auth,
+    status: statusForRequirement(provider.auth, statuses),
+  }));
+}
+
+function statusForRequirement(
+  requirement: ProviderAuthRequirement,
+  statuses: { claude: AuthStatus; anthropic: AuthStatus; openai: AuthStatus },
+): AuthStatus {
+  switch (requirement) {
+    case 'anthropic-api-key':
+      return statuses.anthropic;
+    case 'openai-api-key':
+      return statuses.openai;
+    case 'claude-oauth-or-anthropic-key':
+      return statuses.anthropic === 'authenticated' ? statuses.anthropic : statuses.claude;
+    case 'none':
+      return 'authenticated';
+    default:
+      return 'not_authenticated';
+  }
+}
+
 function resolveConfiguredKey(ref: KeyRef | undefined, fallbackEnv: string): string | null {
   return resolveKey(ref) ?? process.env[fallbackEnv] ?? null;
 }
@@ -101,8 +162,23 @@ function saveToken(envName: string, value: string, envPath?: string): void {
 }
 
 function claudeEnv(): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    PATH: [path.join(PROJECT_ROOT, 'node_modules', '.bin'), process.env.PATH].filter(Boolean).join(path.delimiter),
-  };
+  const allowed = [
+    'CLAUDE_CONFIG_DIR',
+    'HOME',
+    'PATH',
+    'SHELL',
+    'TERM',
+    'TMPDIR',
+    'USER',
+    'XDG_CACHE_HOME',
+    'XDG_CONFIG_HOME',
+    'XDG_DATA_HOME',
+  ];
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of allowed) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  env.PATH = [path.join(PROJECT_ROOT, 'node_modules', '.bin'), env.PATH].filter(Boolean).join(path.delimiter);
+  return env;
 }

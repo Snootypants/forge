@@ -1,0 +1,31 @@
+# Dependencies and build output
+node_modules/
+dist/
+npm-debug.log*
+
+# Runtime state
+dbs/
+logs/
+identity/
+
+# Secrets and local credentials
+.env
+.env.*
+forge.config.yaml
+*.pem
+*.key
+credentials.json
+.claude/
+
+# Local-only eval data/results
+eval/data/
+eval/results*.json
+
+# VCS, editor, and OS noise
+.git/
+.github/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+backup(dirty)/

@@ -1,16 +1,19 @@
 {
   "name": "forge",
   "version": "1.0.0",
+  "private": true,
   "description": "Portable forge platform — agent hosting for ZimaOS and Linux",
   "type": "module",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.6.0"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "npm run typecheck && npm run build:release",
+    "build:release": "rm -rf dist && tsc -p tsconfig.build.json && cp -R src/web/public dist/web/public && cp -R src/db/schemas dist/db/schemas && find dist -name .DS_Store -delete",
     "typecheck": "tsc",
     "check": "npm run typecheck && npm test",
     "start": "node --experimental-strip-types src/index.ts",
+    "start:dist": "node dist/index.js",
     "dev": "node --watch --experimental-strip-types src/index.ts",
     "test": "node --experimental-strip-types --test \"src/**/*.test.ts\""
   },

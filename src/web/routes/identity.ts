@@ -4,7 +4,7 @@ import path from 'node:path';
 
 const FILES = ['IDENTITY.md', 'SOUL.md', 'USER.md'] as const;
 
-export function identityRoutes(identityDir: string): Router {
+export function identityRoutes(identityDir: string, onChange?: () => void): Router {
   const router = Router();
 
   router.get('/', (_req, res) => {
@@ -28,7 +28,9 @@ export function identityRoutes(identityDir: string): Router {
       return;
     }
     const fp = path.join(identityDir, filename);
-    fs.writeFileSync(fp, content, 'utf-8');
+    fs.writeFileSync(fp, content, { encoding: 'utf-8', mode: 0o600 });
+    try { fs.chmodSync(fp, 0o600); } catch { /* best effort */ }
+    onChange?.();
     res.json({ ok: true });
   });
 

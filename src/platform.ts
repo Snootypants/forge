@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadConfig, loadEnvFile } from './config.ts';
+import { loadConfig, resolveConfigFilePath } from './config.ts';
 import { DatabaseManager } from './db/manager.ts';
 import { MemoryService } from './services/memory.ts';
 import { LLMService } from './services/llm.ts';
@@ -20,24 +20,33 @@ export class Platform {
   identity: string = '';
 
   private booted = false;
+  private configPath: string;
 
-  private constructor(config: ForgeConfig, resolved: ResolvedPaths, mode: BootMode) {
+  private constructor(config: ForgeConfig, resolved: ResolvedPaths, mode: BootMode, configPath: string) {
     this.config = config;
     this.resolved = resolved;
     this.mode = mode;
+    this.configPath = configPath;
     this.dbManager = new DatabaseManager(resolved.dbs);
   }
 
   static async boot(mode: BootMode = 'full', configPath?: string): Promise<Platform> {
-    if (Platform.instance?.booted) return Platform.instance;
+    const requestedConfigPath = resolveConfigFilePath(configPath);
+    if (Platform.instance?.booted) {
+      if (Platform.instance.configPath !== requestedConfigPath) {
+        throw new Error(
+          `Platform already booted with config ${Platform.instance.configPath}; shutdown before booting ${requestedConfigPath}`,
+        );
+      }
+      return Platform.instance;
+    }
 
-    loadEnvFile();
-    const { config, resolved } = loadConfig(configPath);
-    const platform = new Platform(config, resolved, mode);
+    const { config, resolved } = loadConfig(requestedConfigPath);
+    const platform = new Platform(config, resolved, mode, requestedConfigPath);
 
     platform.initDatabases();
     platform.initServices();
-    platform.loadIdentity();
+    platform.refreshIdentity();
 
     platform.booted = true;
     Platform.instance = platform;
@@ -66,12 +75,13 @@ export class Platform {
     console.log('[platform] Services initialized');
   }
 
-  private loadIdentity(): void {
+  refreshIdentity(): string {
     const identityDir = this.resolved.identity;
 
     if (!fs.existsSync(identityDir)) {
-      fs.mkdirSync(identityDir, { recursive: true });
+      fs.mkdirSync(identityDir, { recursive: true, mode: 0o700 });
     }
+    try { fs.chmodSync(identityDir, 0o700); } catch { /* best effort */ }
 
     this.scaffoldIdentity(identityDir);
 
@@ -85,6 +95,7 @@ export class Platform {
     }
 
     this.identity = sections.join('\n\n---\n\n');
+    return this.identity;
   }
 
   private scaffoldIdentity(identityDir: string): void {
@@ -125,7 +136,8 @@ export class Platform {
     for (const [filename, content] of Object.entries(templates)) {
       const fp = path.join(identityDir, filename);
       if (!fs.existsSync(fp)) {
-        fs.writeFileSync(fp, content, 'utf-8');
+        fs.writeFileSync(fp, content, { encoding: 'utf-8', mode: 0o600 });
+        try { fs.chmodSync(fp, 0o600); } catch { /* best effort */ }
         created = true;
       }
     }

@@ -36,6 +36,16 @@ test('settings route falls back to defaults for corrupt settings JSON', async ()
       const body = await response.json();
       assert.equal(body.settings.dailyBudget, 50);
       assert.equal(body.info.memory.contextWindowTokens, 80000);
+      assert.equal(body.info.llmProviderRequirements.selectedProvider, 'claude-cli');
+      assert.deepEqual(
+        body.info.llmProviderRequirements.providers.map((p: any) => [p.provider, p.auth, p.effectiveModel, p.modelCompatible]),
+        [
+          ['claude-cli', 'claude-oauth-or-anthropic-key', 'test', true],
+          ['codex-cli', 'openai-api-key', 'gpt-5.2', true],
+          ['openai-api', 'openai-api-key', 'gpt-5.2', true],
+          ['anthropic-api', 'anthropic-api-key', 'claude-sonnet-4-6', true],
+        ],
+      );
     });
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -72,8 +82,9 @@ function context(logs: string) {
       user: { name: 'tester' },
       api: {},
       models: { default: 'test', architect: 'test', sentinel: 'test' },
+      llm: { provider: 'claude-cli', model: 'test', permission_mode: 'default' },
       paths: { dbs: './dbs', identity: './identity', logs: './logs' },
-      services: { web: { port: 6800, context_window_tokens: 80000 }, daemon: { port: 6790 } },
+      services: { web: { port: 6800, host: '127.0.0.1', context_window_tokens: 80000, debug_prompt_context: false }, daemon: { port: 6790 } },
       memory: { retention_days: 30, index_rebuild_interval_minutes: 15 },
       budget: { daily_limit_cents: 5000, per_job_limit_cents: 1500, warn_at_percent: 80 },
     },

@@ -3,19 +3,20 @@ CREATE TABLE IF NOT EXISTS memories (
   type TEXT NOT NULL,
   content TEXT NOT NULL,
   tags TEXT NOT NULL DEFAULT '[]',
-  status TEXT NOT NULL DEFAULT 'active',
-  confidence REAL NOT NULL DEFAULT 1.0,
-  importance REAL NOT NULL DEFAULT 0.5,
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'superseded', 'archived')),
+  confidence REAL NOT NULL DEFAULT 1.0 CHECK(confidence >= 0.0 AND confidence <= 1.0),
+  importance REAL NOT NULL DEFAULT 0.5 CHECK(importance >= 0.0 AND importance <= 1.0),
   accessCount INTEGER NOT NULL DEFAULT 0,
   created TEXT NOT NULL,
   updated TEXT NOT NULL,
-  supersededBy TEXT
+  supersededBy TEXT,
+  FOREIGN KEY (supersededBy) REFERENCES memories(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS memory_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   memory_id TEXT NOT NULL,
-  change_type TEXT NOT NULL,
+  change_type TEXT NOT NULL CHECK(change_type IN ('create', 'update', 'delete', 'supersede')),
   old_content TEXT,
   old_status TEXT,
   old_confidence REAL,

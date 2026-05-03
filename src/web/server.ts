@@ -11,6 +11,7 @@ import { authRoutes } from './routes/auth.ts';
 import { identityRoutes } from './routes/identity.ts';
 
 const COOKIE_NAME = 'forge_session';
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 export interface WebContext {
   config: ForgeConfig;
@@ -20,23 +21,35 @@ export interface WebContext {
   authToken: string;
   identity: string;
   identityDir: string;
+  readIdentity: () => string;
   resolved: ResolvedPaths;
 }
 
-function extractToken(req: express.Request): string | null {
+type AuthCredential = {
+  token: string;
+  source: 'authorization' | 'cookie';
+};
+
+function extractToken(req: express.Request): AuthCredential | null {
   const authHeader = req.headers['authorization'];
   if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
-    return authHeader.slice(7);
+    return { token: authHeader.slice(7), source: 'authorization' };
   }
   const cookies = parseCookies(req.headers.cookie ?? '');
-  return cookies[COOKIE_NAME] ?? null;
+  const token = cookies[COOKIE_NAME];
+  return token ? { token, source: 'cookie' } : null;
 }
 
 function parseCookies(header: string): Record<string, string> {
   const cookies: Record<string, string> = {};
   for (const pair of header.split(';')) {
     const [key, ...vals] = pair.trim().split('=');
-    if (key) cookies[key.trim()] = decodeURIComponent(vals.join('='));
+    if (!key) continue;
+    try {
+      cookies[key.trim()] = decodeURIComponent(vals.join('='));
+    } catch {
+      continue;
+    }
   }
   return cookies;
 }
@@ -47,6 +60,43 @@ function isTokenValid(supplied: string | null, expected: string): boolean {
   const b = Buffer.from(expected, 'utf-8');
   if (a.length !== b.length) return false;
   return crypto.timingSafeEqual(a, b);
+}
+
+function isSameOriginRequest(req: express.Request): boolean {
+  const origin = req.headers.origin;
+  if (typeof origin === 'string') {
+    return isAllowedRequestOrigin(origin, req);
+  }
+
+  const referer = req.headers.referer;
+  if (typeof referer === 'string') {
+    return isAllowedRequestOrigin(referer, req);
+  }
+
+  return false;
+}
+
+function isAllowedRequestOrigin(rawOrigin: string, req: express.Request): boolean {
+  let url: URL;
+  try {
+    url = new URL(rawOrigin);
+  } catch {
+    return false;
+  }
+
+  const host = req.get('host');
+  if (!host) return false;
+
+  const protocol = requestProtocol(req);
+  return url.protocol.replace(':', '') === protocol && url.host === host;
+}
+
+function requestProtocol(req: express.Request): string {
+  const forwarded = req.headers['x-forwarded-proto'];
+  if (typeof forwarded === 'string' && forwarded.trim()) {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.protocol;
 }
 
 export function createWebServer(ctx: WebContext): express.Express {
@@ -68,15 +118,33 @@ export function createWebServer(ctx: WebContext): express.Express {
     });
   });
 
+  app.get('/healthz', (_req, res) => {
+    res.json({ ok: true });
+  });
+
+  app.get('/readyz', (_req, res) => {
+    const databases = ctx.dbManager.health();
+    const ok = databases.every(db => db.ok);
+    res.status(ok ? 200 : 503).json({ ok });
+  });
+
   const authMiddleware: express.RequestHandler = (req, res, next) => {
     if (req.method === 'GET' && !req.path.startsWith('/api/')) {
       return next();
     }
     if (req.path === '/api/auth/login') return next();
 
-    const token = extractToken(req);
-    if (!isTokenValid(token, ctx.authToken)) {
+    const credential = extractToken(req);
+    if (!isTokenValid(credential?.token ?? null, ctx.authToken)) {
       res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    if (
+      credential?.source === 'cookie'
+      && MUTATING_METHODS.has(req.method)
+      && !isSameOriginRequest(req)
+    ) {
+      res.status(403).json({ error: 'Forbidden' });
       return;
     }
     next();
@@ -103,7 +171,9 @@ export function createWebServer(ctx: WebContext): express.Express {
   app.use('/api/settings', settingsRoutes(ctx));
   app.use('/api/messages', messagesRoutes(ctx));
   app.use('/api/auth', authRoutes(ctx));
-  app.use('/api/identity', identityRoutes(ctx.identityDir));
+  app.use('/api/identity', identityRoutes(ctx.identityDir, () => {
+    ctx.identity = ctx.readIdentity();
+  }));
 
   app.get('*', (_req, res) => {
     res.sendFile(path.join(publicDir, 'index.html'));

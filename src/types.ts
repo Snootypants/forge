@@ -5,6 +5,9 @@ export const KeyRefSchema = z.object({
   value: z.string().optional(),
 });
 
+export const LLMProviderSchema = z.enum(['claude-cli', 'codex-cli', 'openai-api', 'anthropic-api']);
+export const LLMPermissionModeSchema = z.enum(['default', 'yolo']);
+
 export const ForgeConfigSchema = z.object({
   forge: z.object({
     name: z.string(),
@@ -22,6 +25,13 @@ export const ForgeConfigSchema = z.object({
       app_token: KeyRefSchema,
       bot_user_id: z.string().default(''),
       channels: z.array(z.string()).default([]),
+      user_allowlist: z.array(z.string()).optional(),
+      admin_allowlist: z.array(z.string()).optional(),
+      allow_all_channels: z.boolean().default(false),
+      require_mention: z.boolean().default(true),
+      allow_yolo: z.boolean().default(false),
+      allow_bot_messages: z.boolean().optional(),
+      allow_app_messages: z.boolean().optional(),
     }).optional(),
   }),
   models: z.object({
@@ -29,6 +39,13 @@ export const ForgeConfigSchema = z.object({
     architect: z.string().default('claude-opus-4-6'),
     sentinel: z.string().default('claude-haiku-4-5'),
   }),
+  llm: z.object({
+    provider: LLMProviderSchema.default('claude-cli'),
+    model: z.string().optional(),
+    permission_mode: LLMPermissionModeSchema.default('default'),
+    command: z.string().optional(),
+    workdir: z.string().optional(),
+  }).default({}),
   paths: z.object({
     dbs: z.string().default('./dbs'),
     identity: z.string().default('./identity'),
@@ -37,8 +54,10 @@ export const ForgeConfigSchema = z.object({
   services: z.object({
     web: z.object({
       port: z.number().default(6800),
+      host: z.string().default('127.0.0.1'),
       auth_token: z.string().optional(),
       context_window_tokens: z.number().int().positive().default(80000),
+      debug_prompt_context: z.boolean().default(false),
     }).default({}),
     daemon: z.object({
       port: z.number().default(6790),
@@ -122,6 +141,7 @@ export interface LLMRequest {
 
 export interface LLMResponse {
   content: string;
+  provider: string;
   model: string;
   inputTokens: number;
   outputTokens: number;

@@ -6,6 +6,7 @@ let toastFn = () => {};
 let apiCall = null;
 let assistantName = 'forge';
 let threadMetaConfig = { contextWindowTokens: 80000 };
+let traceSeq = 0;
 
 export function setMsgContainer(el) { msgContainer = el; }
 export function setMessages(m) { messages = m; }
@@ -26,7 +27,19 @@ export function setThreadMetaConfig(config) {
 }
 
 function el(tag, cls) { const e = document.createElement(tag); if (cls) e.className = cls; return e; }
-function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function escAttr(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+function roleClass(role) {
+  return ['system', 'user', 'assistant', 'tool'].includes(role) ? role : 'unknown';
+}
+function traceId() { traceSeq += 1; return `trace-body-${traceSeq}`; }
+function traceToggle(label, bodyId, open = false, count = '') {
+  return `<button class="trace-toggle" type="button" aria-expanded="${open}" aria-controls="${escAttr(bodyId)}">
+    <span class="arrow${open ? ' open' : ''}" aria-hidden="true">›</span>
+    <span class="smallcaps" style="font-size:10px">${esc(label)}</span>
+    ${count !== '' ? `<span class="count">${esc(count)}</span>` : ''}
+  </button>`;
+}
 
 function textToHtml(text) {
   if (!text) return '';
@@ -35,7 +48,9 @@ function textToHtml(text) {
 }
 
 export function scrollToBottom(container) {
-  const s = container?.querySelector?.('.chat-scroll') || document.querySelector('.chat-scroll');
+  const s = msgContainer?.closest?.('.chat-center') ||
+    container?.querySelector?.('.chat-center') ||
+    document.querySelector('.chat-center');
   if (s) requestAnimationFrame(() => { s.scrollTop = s.scrollHeight; });
 }
 
@@ -53,8 +68,17 @@ export function renderAllMessages() {
 export function mkAssistant(msg, idx, first) {
   const div = el('div', `msg-assistant${selectedMsgId === idx ? ' selected' : ''}`);
   div.dataset.idx = idx;
+  div.tabIndex = 0;
+  div.setAttribute('role', 'button');
+  div.setAttribute('aria-pressed', String(selectedMsgId === idx));
+  div.setAttribute('aria-label', `Inspect ${assistantName} reply`);
   if (!first) div.style.marginTop = '36px';
   div.addEventListener('click', () => selectMessage(idx));
+  div.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    selectMessage(idx);
+  });
 
   div.appendChild(el('div', 'node-dot'));
   const sender = el('div', 'sender smallcaps');
@@ -123,22 +147,22 @@ export function mkThinking() {
 
 export function selectMessage(idx) {
   selectedMsgId = idx;
-  document.querySelectorAll('.msg-assistant').forEach(e =>
-    e.classList.toggle('selected', parseInt(e.dataset.idx) === idx));
+  document.querySelectorAll('.msg-assistant').forEach(e => {
+    const selected = parseInt(e.dataset.idx) === idx;
+    e.classList.toggle('selected', selected);
+    e.setAttribute('aria-pressed', String(selected));
+  });
   renderInspector();
 }
 
 function renderPromptSection(ctx) {
   if (!ctx) {
+    const id = traceId();
     return `<section>
-      <button class="trace-toggle" data-open="false">
-        <span class="arrow">›</span>
-        <span class="smallcaps" style="font-size:10px">Prompt</span>
-        <span class="count">—</span>
-      </button>
-      <div class="trace-body" style="display:none">
-        <div style="font-size:11px;color:var(--ink-faint);font-style:italic">
-          No prompt data saved for this message.
+      ${traceToggle('Prompt trace', id, false, 'unavailable')}
+      <div class="trace-body" id="${id}" hidden>
+        <div class="trace-unavailable">
+          Prompt trace is unavailable. Debug prompt capture may be disabled, or this message was loaded from history without trace data.
         </div>
       </div>
     </section>`;
@@ -149,28 +173,23 @@ function renderPromptSection(ctx) {
   if (ctx.messages && ctx.messages.length > 0) {
     messagesHtml = ctx.messages.map(m =>
       `<div class="prompt-msg">
-        <div class="smallcaps prompt-role ${m.role}">${esc(m.role)}</div>
+        <div class="smallcaps prompt-role ${roleClass(m.role)}">${esc(m.role)}</div>
         <div class="prompt-content">${esc(m.content)}</div>
       </div>`
     ).join('');
   }
 
+  const systemId = traceId();
+  const messagesId = traceId();
   return `<section>
-      <button class="trace-toggle" data-open="false">
-        <span class="arrow">›</span>
-        <span class="smallcaps" style="font-size:10px">System prompt</span>
-      </button>
-      <div class="trace-body" style="display:none">
+      ${traceToggle('System prompt', systemId)}
+      <div class="trace-body" id="${systemId}" hidden>
         <div class="prompt-content">${esc(ctx.system || '')}</div>
       </div>
     </section>
     <section>
-      <button class="trace-toggle" data-open="false">
-        <span class="arrow">›</span>
-        <span class="smallcaps" style="font-size:10px">Messages</span>
-        <span class="count">${msgCount}</span>
-      </button>
-      <div class="trace-body" style="display:none">
+      ${traceToggle('Messages', messagesId, false, msgCount)}
+      <div class="trace-body" id="${messagesId}" hidden>
         ${messagesHtml || '<div style="font-size:11px;color:var(--ink-faint);font-style:italic">No messages in context.</div>'}
       </div>
     </section>`;
@@ -189,6 +208,7 @@ export function renderInspector() {
   }
 
   const meta = msg.meta || { model: '—', input: 0, output: 0 };
+  const usageId = traceId();
   c.innerHTML = `<div class="inspector">
     <div>
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
@@ -198,14 +218,13 @@ export function renderInspector() {
       <div style="font-size:11.5px;color:var(--ink-mute);line-height:1.45">Metadata for this reply.</div>
     </div>
     <section>
-      <button class="trace-toggle" data-open="true">
-        <span class="arrow open">›</span>
-        <span class="smallcaps" style="font-size:10px">Usage</span>
-      </button>
-      <div class="trace-body">
+      ${traceToggle('Usage', usageId, true)}
+      <div class="trace-body" id="${usageId}">
         <div class="usage-grid">
           <span style="color:var(--ink-mute)">model</span>
           <span class="mono" style="color:var(--ink)">${esc(meta.model)}</span>
+          <span style="color:var(--ink-mute)">provider</span>
+          <span class="mono" style="color:var(--ink)">${esc(meta.provider || 'unknown')}</span>
           <span style="color:var(--ink-mute)">input</span>
           <span class="mono" style="color:var(--ink)">${meta.input.toLocaleString()} tok</span>
           <span style="color:var(--ink-mute)">output</span>
@@ -216,13 +235,19 @@ export function renderInspector() {
     ${renderPromptSection(msg.promptContext)}
   </div>`;
 
-  c.querySelectorAll('.trace-toggle').forEach(btn => {
+  setupTraceToggles(c);
+}
+
+function setupTraceToggles(container) {
+  container.querySelectorAll('.trace-toggle').forEach(btn => {
     btn.addEventListener('click', () => {
-      const body = btn.nextElementSibling;
+      const body = document.getElementById(btn.getAttribute('aria-controls'));
       const arrow = btn.querySelector('.arrow');
-      const open = body.style.display !== 'none';
-      body.style.display = open ? 'none' : 'block';
-      arrow.classList.toggle('open', !open);
+      if (!body) return;
+      const open = btn.getAttribute('aria-expanded') === 'true';
+      btn.setAttribute('aria-expanded', String(!open));
+      body.hidden = open;
+      arrow?.classList.toggle('open', !open);
     });
   });
 }
@@ -275,7 +300,7 @@ async function loadIdentityFiles() {
     for (const file of data.files) {
       const row = document.createElement('div');
       row.className = 'identity-file';
-      row.innerHTML = `<span class="file-name">${esc(file.name)}</span><button class="btn-edit">Edit</button>`;
+      row.innerHTML = `<span class="file-name">${esc(file.name)}</span><button class="btn-edit" type="button">Edit</button>`;
       row.querySelector('.btn-edit').addEventListener('click', () => openEditor(file));
       container.appendChild(row);
     }
@@ -305,11 +330,20 @@ function openEditor(file) {
 
   cancelBtn.addEventListener('click', () => editor.remove());
   saveBtn.addEventListener('click', async () => {
-    await apiCall(`/api/identity/${file.name}`, {
-      method: 'PUT', body: JSON.stringify({ content: ta.value }),
-    });
-    toastFn(`${file.name} saved`, 'success');
-    file.content = ta.value;
-    editor.remove();
+    const originalText = saveBtn.textContent;
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    try {
+      await apiCall(`/api/identity/${encodeURIComponent(file.name)}`, {
+        method: 'PUT', body: JSON.stringify({ content: ta.value }),
+      });
+      toastFn(`${file.name} saved`, 'success');
+      file.content = ta.value;
+      editor.remove();
+    } catch (err) {
+      toastFn(`Failed to save ${file.name}: ${err.message}`, 'error');
+      saveBtn.disabled = false;
+      saveBtn.textContent = originalText;
+    }
   });
 }

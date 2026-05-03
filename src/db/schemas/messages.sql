@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS messages (
   text TEXT NOT NULL DEFAULT '',
   ts TEXT NOT NULL,
   threadTs TEXT,
-  mentioned INTEGER DEFAULT 0,
+  mentioned INTEGER DEFAULT 0 CHECK(mentioned IN (0, 1)),
   receivedAt INTEGER NOT NULL,
   prompt_context TEXT,
   llm_metadata TEXT,
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS annotations (
   content TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT,
-  FOREIGN KEY (message_id) REFERENCES messages(id)
+  FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages (channel);

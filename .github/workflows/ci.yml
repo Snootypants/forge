@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run checks
+        run: npm run check
+
+      - name: Build release
+        run: npm run build
+
+      - name: Build Docker image
+        run: docker build -t forge:ci .
+
+      - name: Smoke Docker readiness
+        run: |
+          mkdir -p "$RUNNER_TEMP/forge-smoke"
+          cat > "$RUNNER_TEMP/forge-smoke/forge.config.yaml" <<'YAML'
+          forge:
+            name: forge-ci
+            version: "1.0.0"
+            root: /app
+
+          user:
+            name: ci
+
+          api:
+            anthropic:
+              env: ANTHROPIC_API_KEY
+            openai:
+              env: OPENAI_API_KEY
+            slack:
+              bot_token:
+                env: SLACK_BOT_TOKEN
+              app_token:
+                env: SLACK_APP_TOKEN
+              bot_user_id: ""
+              channels: []
+              allow_all_channels: false
+              require_mention: true
+              allow_yolo: false
+
+          models:
+            default: claude-sonnet-4-6
+            architect: claude-opus-4-6
+            sentinel: claude-haiku-4-5
+
+          llm:
+            provider: claude-cli
+            model: claude-sonnet-4-6
+            permission_mode: default
+
+          paths:
+            dbs: ./dbs
+            identity: ./identity
+            logs: ./logs
+
+          services:
+            web:
+              port: 6800
+              host: 127.0.0.1
+              context_window_tokens: 80000
+              debug_prompt_context: false
+            daemon:
+              port: 6790
+
+          memory:
+            retention_days: 30
+            index_rebuild_interval_minutes: 15
+
+          budget:
+            daily_limit_cents: 5000
+            per_job_limit_cents: 1500
+            warn_at_percent: 80
+          YAML
+
+          docker run -d \
+            --name forge-ci \
+            -p 6800:6800 \
+            --mount type=bind,src="$RUNNER_TEMP/forge-smoke/forge.config.yaml",dst=/config/forge.config.yaml,readonly \
+            --mount type=volume,src=forge-ci-dbs,dst=/app/dbs \
+            --mount type=volume,src=forge-ci-identity,dst=/app/identity \
+            --mount type=volume,src=forge-ci-logs,dst=/app/logs \
+            forge:ci web
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:6800/readyz; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          docker logs forge-ci
+          exit 1
+
+      - name: Clean up Docker smoke
+        if: always()
+        run: |
+          docker rm -f forge-ci || true
+          docker volume rm forge-ci-dbs forge-ci-identity forge-ci-logs || true
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev

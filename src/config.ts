@@ -5,10 +5,9 @@ import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import { ForgeConfigSchema, type ForgeConfig, type KeyRef, type ResolvedPaths } from './types.ts';
 
-let _cached: { config: ForgeConfig; resolved: ResolvedPaths } | null = null;
-
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const AUTH_TOKEN_FILENAME = 'web-auth-token';
+const envValuesLoadedFromFiles = new Map<string, string>();
 
 function resolveTilde(p: string): string {
   if (p.startsWith('~/') || p === '~') {
@@ -48,19 +47,24 @@ function defaultAppPath(filename: string): string {
   return path.join(APP_ROOT, filename);
 }
 
-export function loadConfig(configPath?: string): { config: ForgeConfig; resolved: ResolvedPaths } {
-  if (_cached) return _cached;
+export function resolveConfigFilePath(configPath?: string): string {
+  return configPath ? resolveInputPath(configPath, process.cwd()) : defaultAppPath('forge.config.yaml');
+}
 
-  const searchPath = configPath ? resolveInputPath(configPath, process.cwd()) : defaultAppPath('forge.config.yaml');
+export function loadConfig(configPath?: string): { config: ForgeConfig; resolved: ResolvedPaths } {
+  const searchPath = resolveConfigFilePath(configPath);
   if (!fs.existsSync(searchPath)) {
     throw new Error(`Config not found: ${searchPath}`);
   }
 
+  const configDir = path.dirname(searchPath);
+  loadEnvFile(path.join(configDir, '.env'), { overrideLoaded: true });
+
   const raw = fs.readFileSync(searchPath, 'utf-8');
   const parsed = resolveEnvVars(yaml.load(raw));
   const config = ForgeConfigSchema.parse(parsed);
+  applyEnvOverrides(config);
 
-  const configDir = path.dirname(searchPath);
   const root = resolveInputPath(config.forge.root, configDir);
   const resolvePath = (p: string): string => {
     const expanded = resolveTilde(p);
@@ -74,23 +78,37 @@ export function loadConfig(configPath?: string): { config: ForgeConfig; resolved
     logs: resolvePath(config.paths.logs),
   };
 
-  for (const dir of [resolved.dbs, resolved.logs]) {
-    fs.mkdirSync(dir, { recursive: true });
+  if (config.llm.workdir) {
+    config.llm.workdir = resolveInputPath(config.llm.workdir, configDir);
   }
 
-  _cached = { config, resolved };
-  return _cached;
+  for (const dir of [resolved.dbs, resolved.logs]) {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    try { fs.chmodSync(dir, 0o700); } catch { /* best effort on shared filesystems */ }
+  }
+
+  return { config, resolved };
 }
 
-export function loadEnvFile(envPath?: string): void {
+export function loadEnvFile(envPath?: string, options: { overrideLoaded?: boolean } = {}): void {
   const p = envPath ? resolveInputPath(envPath, process.cwd()) : defaultAppPath('.env');
   if (!fs.existsSync(p)) return;
 
   const lines = fs.readFileSync(p, 'utf-8').split('\n');
   for (const line of lines) {
     const parsed = parseEnvLine(line);
-    if (parsed && !process.env[parsed.key]) {
+    if (!parsed) continue;
+
+    const current = process.env[parsed.key];
+    if (current === undefined) {
       process.env[parsed.key] = parsed.value;
+      envValuesLoadedFromFiles.set(parsed.key, parsed.value);
+    } else if (
+      options.overrideLoaded &&
+      envValuesLoadedFromFiles.get(parsed.key) === current
+    ) {
+      process.env[parsed.key] = parsed.value;
+      envValuesLoadedFromFiles.set(parsed.key, parsed.value);
     }
   }
 }
@@ -118,6 +136,7 @@ export function saveEnvValue(key: string, value: string, envPath?: string): void
   }
 
   fs.writeFileSync(p, updated.join('\n'), { mode: 0o600 });
+  try { fs.chmodSync(p, 0o600); } catch { /* best effort */ }
 }
 
 function parseEnvLine(line: string): { key: string; value: string } | null {
@@ -184,11 +203,28 @@ export function resolveWebAuthToken(
   }
 
   fs.mkdirSync(resolved.logs, { recursive: true });
+  try { fs.chmodSync(resolved.logs, 0o700); } catch { /* best effort */ }
   const token = crypto.randomBytes(32).toString('hex');
   fs.writeFileSync(tokenPath, `${token}\n`, { mode: 0o600 });
+  try { fs.chmodSync(tokenPath, 0o600); } catch { /* best effort */ }
   return { token, source: 'generated', path: tokenPath };
 }
 
 export function clearConfigCache(): void {
-  _cached = null;
+  // Config loading is intentionally uncached so --config boots cannot reuse
+  // paths, env files, or env overrides from an earlier selection.
+}
+
+function applyEnvOverrides(config: ForgeConfig): void {
+  const host = process.env.FORGE_WEB_HOST?.trim();
+  if (host) config.services.web.host = host;
+
+  const port = process.env.FORGE_WEB_PORT?.trim();
+  if (port) {
+    const parsed = Number(port);
+    if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 65535) {
+      throw new Error(`Invalid FORGE_WEB_PORT: ${port}`);
+    }
+    config.services.web.port = parsed;
+  }
 }

@@ -1,30 +1,60 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
 import type { WebContext } from '../server.ts';
-import { handleMemoryCommand } from '../../slack/context.ts';
+import { buildChatContext, handleMemoryCommand } from '../../services/chat.ts';
+import { sanitizeProviderError } from '../../services/llm.ts';
+
+const DEFAULT_POLL_LIMIT = 200;
+const MAX_POLL_LIMIT = 500;
+
+const POLL_COLUMNS = [
+  'id',
+  'channel',
+  'channelName',
+  'user',
+  'userName',
+  'text',
+  'ts',
+  'threadTs',
+  'mentioned',
+  'receivedAt',
+  'llm_metadata',
+  'subtype',
+].join(', ');
 
 export function messagesRoutes(ctx: WebContext): Router {
   const router = Router();
 
   router.get('/poll', (req, res) => {
-    const since = req.query.since as string | undefined;
-    const limit = parseInt(req.query.limit as string) || 200;
+    const since = parsePollInteger(req.query.since, 'since');
+    if (!since.ok) {
+      res.status(400).json({ error: since.error });
+      return;
+    }
+
+    const limit = parsePollInteger(req.query.limit, 'limit');
+    if (!limit.ok) {
+      res.status(400).json({ error: limit.error });
+      return;
+    }
+
+    const effectiveLimit = clamp(limit.value ?? DEFAULT_POLL_LIMIT, 1, MAX_POLL_LIMIT);
     const db = ctx.dbManager.get('messages');
 
     let rows;
-    if (since) {
+    if (since.value !== undefined) {
       rows = db.prepare(`
-        SELECT * FROM messages
+        SELECT ${POLL_COLUMNS} FROM messages
         WHERE receivedAt > ?
         ORDER BY receivedAt ASC
         LIMIT ?
-      `).all(parseInt(since), limit);
+      `).all(since.value, effectiveLimit);
     } else {
       rows = db.prepare(`
-        SELECT * FROM messages
+        SELECT ${POLL_COLUMNS} FROM messages
         ORDER BY receivedAt DESC
         LIMIT ?
-      `).all(limit).reverse();
+      `).all(effectiveLimit).reverse();
     }
 
     res.json({
@@ -78,17 +108,26 @@ export function messagesRoutes(ctx: WebContext): Router {
         return;
       }
 
-      const context = buildSimpleContext(ctx, content);
+      const context = buildChatContext({
+        messagesDb: ctx.dbManager.get('messages'),
+        memory: ctx.memory,
+        identity: ctx.readIdentity(),
+        assistantName: ctx.config.forge.name,
+        currentMessage: content,
+        userName: ctx.config.user.name,
+        channel: 'web',
+        interfaceName: 'Web Chat',
+      });
       const response = await ctx.llm.complete({
         system: context.system,
-        messages: [{ role: 'user', content }],
+        messages: context.messages,
       });
 
       const replyTs = (Date.now() + 1).toString();
       const replyId = `web:assistant:${crypto.randomUUID()}`;
       const promptContext = JSON.stringify({
         system: context.system,
-        messages: [{ role: 'user', content }],
+        messages: context.messages,
       });
       db.prepare(`
         INSERT INTO messages (id, channel, channelName, user, userName, text, ts, threadTs, receivedAt, llm_metadata, prompt_context)
@@ -100,20 +139,21 @@ export function messagesRoutes(ctx: WebContext): Router {
         replyTs,
         ts,
         Date.now(),
-        JSON.stringify({ model: response.model, inputTokens: response.inputTokens, outputTokens: response.outputTokens }),
+        JSON.stringify({ provider: response.provider, model: response.model, inputTokens: response.inputTokens, outputTokens: response.outputTokens }),
         promptContext,
       );
 
       res.json({
         reply: response.content,
+        provider: response.provider,
         model: response.model,
         ts: replyTs,
         agentName: ctx.config.forge.name,
         usage: { input: response.inputTokens, output: response.outputTokens },
-        prompt_context: promptContext,
+        ...(ctx.config.services.web.debug_prompt_context ? { prompt_context: promptContext } : {}),
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = sanitizeProviderError(err, 'chat request failed');
       console.error('[web] Chat error:', msg);
       res.status(500).json({ error: msg });
     }
@@ -122,21 +162,23 @@ export function messagesRoutes(ctx: WebContext): Router {
   return router;
 }
 
-function buildSimpleContext(ctx: WebContext, message: string): { system: string } {
-  const sections: string[] = [ctx.identity];
+type ParsedPollInteger =
+  | { ok: true; value: number | undefined }
+  | { ok: false; error: string };
 
-  const memories = ctx.memory.search(message, 5);
-  if (memories.length > 0) {
-    sections.push('\n## Relevant Memories');
-    for (const mem of memories) {
-      sections.push(`- [${mem.type}] ${mem.content}`);
-    }
+function parsePollInteger(value: unknown, name: 'since' | 'limit'): ParsedPollInteger {
+  if (value === undefined) return { ok: true, value: undefined };
+  if (Array.isArray(value)) return { ok: false, error: `${name} must be a single integer` };
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+    return { ok: false, error: `${name} must be a non-negative integer` };
   }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    return { ok: false, error: `${name} is too large` };
+  }
+  return { ok: true, value: parsed };
+}
 
-  sections.push(`\n## Context`);
-  sections.push(`User: ${ctx.config.user.name}`);
-  sections.push(`Time: ${new Date().toISOString()}`);
-  sections.push(`Interface: Web Chat`);
-
-  return { system: sections.join('\n') };
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }

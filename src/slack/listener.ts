@@ -4,7 +4,7 @@ import type { LLMService } from '../services/llm.ts';
 import type { MemoryService } from '../services/memory.ts';
 import type { ForgeConfig } from '../types.ts';
 import { resolveKey } from '../config.ts';
-import { buildContext, handleMemoryCommand } from './context.ts';
+import { buildChatContext, handleMemoryCommand } from '../services/chat.ts';
 
 interface SlackDeps {
   config: ForgeConfig;
@@ -12,6 +12,21 @@ interface SlackDeps {
   llm: LLMService;
   memory: MemoryService;
   identity: string;
+}
+
+export interface SlackMessageRow {
+  id: string;
+  channel: string;
+  channelName: string | null;
+  user: string | null;
+  userName: string | null;
+  text: string;
+  ts: string;
+  threadTs: string | null;
+  mentioned: number;
+  receivedAt: number;
+  llmMetadata?: string | null;
+  promptContext?: string | null;
 }
 
 const seen = new Set<string>();
@@ -45,8 +60,52 @@ function enqueueThread(key: string, fn: () => Promise<void>): void {
 }
 
 export function isSlackChannelAllowed(channel: string, allowedChannels: string[] = []): boolean {
-  if (allowedChannels.length === 0) return true;
+  if (allowedChannels.length === 0) return false;
   return allowedChannels.includes(channel);
+}
+
+export function isSlackUserAllowed(userId: string, userAllowlist: string[] = [], adminAllowlist: string[] = []): boolean {
+  if (!userId) return false;
+  return userAllowlist.includes(userId) || adminAllowlist.includes(userId);
+}
+
+function isCliProvider(provider: string): boolean {
+  return provider === 'claude-cli' || provider === 'codex-cli';
+}
+
+export function shouldRespondToSlackMessage(params: {
+  config: ForgeConfig;
+  channel: string;
+  text: string;
+  botUserId: string;
+  userId?: string;
+  subtype?: string | null;
+  botId?: string | null;
+  appId?: string | null;
+}): boolean {
+  const slack = params.config.api.slack;
+  if (!slack) return false;
+
+  const fromBot = params.subtype === 'bot_message' || Boolean(params.botId);
+  const fromApp = Boolean(params.appId);
+  if (fromBot && !slack.allow_bot_messages) return false;
+  if (fromApp && !slack.allow_app_messages) return false;
+
+  if (!fromBot && !fromApp && !isSlackUserAllowed(params.userId ?? '', slack.user_allowlist, slack.admin_allowlist)) {
+    return false;
+  }
+
+  const inDirectMessage = params.channel.startsWith('D');
+  const mentioned = params.botUserId ? params.text.includes(params.botUserId) : false;
+  const allowedChannel = slack.allow_all_channels || isSlackChannelAllowed(params.channel, slack.channels);
+
+  if (isCliProvider(params.config.llm.provider) && params.config.llm.permission_mode === 'yolo' && !slack.allow_yolo) {
+    return false;
+  }
+
+  if (inDirectMessage) return true;
+  if (!allowedChannel) return false;
+  return slack.require_mention ? mentioned : true;
 }
 
 export function resolveSlackTokens(config: ForgeConfig): { botToken: string | null; appToken: string | null } {
@@ -54,6 +113,38 @@ export function resolveSlackTokens(config: ForgeConfig): { botToken: string | nu
     botToken: resolveKey(config.api.slack?.bot_token) ?? process.env.SLACK_BOT_TOKEN ?? null,
     appToken: resolveKey(config.api.slack?.app_token) ?? process.env.SLACK_APP_TOKEN ?? null,
   };
+}
+
+export function upsertSlackMessage(db: Database.Database, message: SlackMessageRow): void {
+  db.prepare(`
+    INSERT INTO messages (id, channel, channelName, user, userName, text, ts, threadTs, mentioned, receivedAt, llm_metadata, prompt_context)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      channel = excluded.channel,
+      channelName = excluded.channelName,
+      user = excluded.user,
+      userName = excluded.userName,
+      text = excluded.text,
+      ts = excluded.ts,
+      threadTs = excluded.threadTs,
+      mentioned = excluded.mentioned,
+      receivedAt = excluded.receivedAt,
+      llm_metadata = excluded.llm_metadata,
+      prompt_context = excluded.prompt_context
+  `).run(
+    message.id,
+    message.channel,
+    message.channelName,
+    message.user,
+    message.userName,
+    message.text,
+    message.ts,
+    message.threadTs,
+    message.mentioned,
+    message.receivedAt,
+    message.llmMetadata ?? null,
+    message.promptContext ?? null,
+  );
 }
 
 export async function startSlackListener(deps: SlackDeps): Promise<App> {
@@ -80,12 +171,14 @@ export async function startSlackListener(deps: SlackDeps): Promise<App> {
     const ts = (msg.ts as string) ?? '';
     const threadTs = (msg.thread_ts as string) ?? null;
     const subtype = (msg.subtype as string) ?? null;
+    const botId = (msg.bot_id as string) ?? null;
+    const appId = (msg.app_id as string) ?? null;
     const clientMsgId = (msg.client_msg_id as string) ?? ts;
 
     if (userId === botUserId) return;
     if (subtype === 'message_deleted' || subtype === 'message_changed') return;
     if (!text.trim()) return;
-    if (!isSlackChannelAllowed(channel, deps.config.api.slack?.channels ?? [])) return;
+    if (!shouldRespondToSlackMessage({ config: deps.config, channel, text, botUserId, userId, subtype, botId, appId })) return;
 
     if (seen.has(clientMsgId)) return;
     seen.add(clientMsgId);
@@ -104,23 +197,38 @@ export async function startSlackListener(deps: SlackDeps): Promise<App> {
     } catch { /* use channel id */ }
 
     const msgId = `${channel}:${ts}`;
-    deps.messagesDb.prepare(`
-      INSERT OR REPLACE INTO messages (id, channel, channelName, user, userName, text, ts, threadTs, mentioned, receivedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(msgId, channel, channelName, userId, userName, text, ts, threadTs, text.includes(botUserId) ? 1 : 0, Date.now());
+    upsertSlackMessage(deps.messagesDb, {
+      id: msgId,
+      channel,
+      channelName,
+      user: userId,
+      userName,
+      text,
+      ts,
+      threadTs,
+      mentioned: text.includes(botUserId) ? 1 : 0,
+      receivedAt: Date.now(),
+    });
 
     const threadKey = threadTs ?? ts;
     enqueueThread(`${channel}:${threadKey}`, async () => {
       const assistantName = deps.config.forge.name;
       const saveAssistantReply = (replyTs: string, replyText: string, promptContext: string | null, metadata: string | null) => {
         const replyId = `${channel}:${replyTs}`;
-        deps.messagesDb.prepare(`
-          INSERT OR REPLACE INTO messages (id, channel, channelName, user, userName, text, ts, threadTs, mentioned, receivedAt, llm_metadata, prompt_context)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
-        `).run(
-          replyId, channel, channelName, botUserId, assistantName, replyText,
-          replyTs, threadTs ?? ts, Date.now(), metadata, promptContext,
-        );
+        upsertSlackMessage(deps.messagesDb, {
+          id: replyId,
+          channel,
+          channelName,
+          user: botUserId,
+          userName: assistantName,
+          text: replyText,
+          ts: replyTs,
+          threadTs: threadTs ?? ts,
+          mentioned: 0,
+          receivedAt: Date.now(),
+          llmMetadata: metadata,
+          promptContext,
+        });
       };
 
       try {
@@ -137,7 +245,7 @@ export async function startSlackListener(deps: SlackDeps): Promise<App> {
           });
           saveAssistantReply(replyResult.ts ?? '', command.reply, null, null);
         } else {
-          const context = buildContext({
+          const context = buildChatContext({
             messagesDb: deps.messagesDb,
             memory: deps.memory,
             identity: deps.identity,
@@ -168,7 +276,7 @@ export async function startSlackListener(deps: SlackDeps): Promise<App> {
             replyTs,
             response.content,
             promptContext,
-            JSON.stringify({ model: response.model, inputTokens: response.inputTokens, outputTokens: response.outputTokens }),
+            JSON.stringify({ provider: response.provider, model: response.model, inputTokens: response.inputTokens, outputTokens: response.outputTokens }),
           );
         }
       } catch (err) {

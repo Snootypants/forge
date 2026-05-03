@@ -32,6 +32,7 @@ export class MemoryService {
   private db: Database.Database;
   private embedService: EmbedService | null = null;
   private vecAvailable = false;
+  private vectorQueue: Promise<void> = Promise.resolve();
 
   constructor(db: Database.Database) {
     this.db = db;
@@ -63,24 +64,14 @@ export class MemoryService {
     const timestamp = now();
     const tags = JSON.stringify(input.tags ?? []);
 
-    this.db.prepare(`
-      INSERT INTO memories (id, type, content, tags, confidence, importance, created, updated)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, input.type, input.content, tags, input.confidence ?? 1.0, input.importance ?? 0.5, timestamp, timestamp);
+    this.db.transaction(() => {
+      this.insertMemoryRow(id, input, tags, timestamp);
+      this.insertMemoryFts(id, input.content, tags);
+      this.recordHistory(id, 'create', { newContent: input.content, newStatus: 'active' });
+    })();
 
-    this.db.prepare(`
-      INSERT INTO memories_fts (id, content, tags)
-      VALUES (?, ?, ?)
-    `).run(id, input.content, tags);
+    await this.indexActiveVector(id, input.content);
 
-    if (this.vecAvailable && this.embedService?.available) {
-      const embedding = await this.embedService.embed(input.content);
-      if (embedding) {
-        this.storeVector(id, embedding);
-      }
-    }
-
-    this.recordHistory(id, 'create', { newContent: input.content, newStatus: 'active' });
     return id;
   }
 
@@ -89,18 +80,17 @@ export class MemoryService {
     const timestamp = now();
     const tags = JSON.stringify(input.tags ?? []);
 
-    this.db.prepare(`
-      INSERT INTO memories (id, type, content, tags, confidence, importance, created, updated)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, input.type, input.content, tags, input.confidence ?? 1.0, input.importance ?? 0.5, timestamp, timestamp);
-
-    this.db.prepare(`
-      INSERT INTO memories_fts (id, content, tags)
-      VALUES (?, ?, ?)
-    `).run(id, input.content, tags);
-
-    this.recordHistory(id, 'create', { newContent: input.content, newStatus: 'active' });
+    this.db.transaction(() => {
+      this.insertMemoryRow(id, input, tags, timestamp);
+      this.insertMemoryFts(id, input.content, tags);
+      this.recordHistory(id, 'create', { newContent: input.content, newStatus: 'active' });
+    })();
+    this.enqueueVectorIndex(id, input.content);
     return id;
+  }
+
+  async flushVectorIndexQueue(): Promise<void> {
+    await this.vectorQueue;
   }
 
   get(id: string): MemoryRecord | null {
@@ -247,6 +237,51 @@ export class MemoryService {
     }
   }
 
+  private deleteVector(id: string): void {
+    if (!this.vecAvailable) return;
+    try {
+      this.db.prepare('DELETE FROM memories_vec WHERE id = ?').run(id);
+    } catch {
+      /* vector table is optional */
+    }
+  }
+
+  private canUseVectors(): boolean {
+    return this.vecAvailable && this.embedService?.available === true;
+  }
+
+  private enqueueVectorIndex(id: string, content: string): void {
+    if (!this.canUseVectors()) return;
+
+    const job = this.vectorQueue.then(() => this.indexActiveVector(id, content));
+    this.vectorQueue = job.catch(err => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[memory] Vector indexing failed for ${id}: ${msg}`);
+    });
+  }
+
+  private async indexActiveVector(id: string, content: string): Promise<void> {
+    if (!this.canUseVectors()) return;
+
+    try {
+      const embedding = await this.embedService?.embed(content);
+      if (!embedding) return;
+
+      const current = this.db.prepare('SELECT content, status FROM memories WHERE id = ?').get(id) as
+        | Pick<RawMemoryRow, 'content' | 'status'>
+        | undefined;
+
+      if (current?.status === 'active' && current.content === content) {
+        this.storeVector(id, embedding);
+      } else if (!current || current.status !== 'active') {
+        this.deleteVector(id);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[memory] Vector indexing failed for ${id}: ${msg}`);
+    }
+  }
+
   list(opts?: { type?: string; status?: string; limit?: number }): MemoryRecord[] {
     const conditions: string[] = [];
     const params: unknown[] = [];
@@ -265,6 +300,9 @@ export class MemoryService {
   update(id: string, partial: Partial<Pick<MemoryRecord, 'content' | 'tags' | 'status' | 'confidence' | 'importance'>>): boolean {
     const existing = this.db.prepare('SELECT * FROM memories WHERE id = ?').get(id) as RawMemoryRow | undefined;
     if (!existing) return false;
+    const finalContent = partial.content ?? existing.content;
+    const finalStatus = partial.status ?? existing.status;
+    const vectorRelevant = partial.content !== undefined || partial.status !== undefined;
 
     const sets: string[] = ['updated = ?'];
     const params: unknown[] = [now()];
@@ -276,20 +314,28 @@ export class MemoryService {
     if (partial.importance !== undefined) { sets.push('importance = ?'); params.push(partial.importance); }
 
     params.push(id);
-    this.db.prepare(`UPDATE memories SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+    this.db.transaction(() => {
+      this.db.prepare(`UPDATE memories SET ${sets.join(', ')} WHERE id = ?`).run(...params);
 
-    if (partial.content !== undefined || partial.tags !== undefined) {
-      const newContent = partial.content ?? existing.content;
-      const newTags = partial.tags ? JSON.stringify(partial.tags) : existing.tags;
-      this.db.prepare('DELETE FROM memories_fts WHERE id = ?').run(id);
-      this.db.prepare('INSERT INTO memories_fts (id, content, tags) VALUES (?, ?, ?)').run(id, newContent, newTags);
+      if (partial.content !== undefined || partial.tags !== undefined) {
+        const newContent = partial.content ?? existing.content;
+        const newTags = partial.tags !== undefined ? JSON.stringify(partial.tags) : existing.tags;
+        this.replaceMemoryFts(id, newContent, newTags);
+      }
+      if (partial.content !== undefined || partial.status !== undefined) {
+        this.deleteVector(id);
+      }
+
+      this.recordHistory(id, 'update', {
+        oldContent: existing.content, oldStatus: existing.status,
+        oldConfidence: existing.confidence, oldTags: existing.tags,
+        newContent: partial.content, newStatus: partial.status,
+      });
+    })();
+
+    if (vectorRelevant && finalStatus === 'active') {
+      this.enqueueVectorIndex(id, finalContent);
     }
-
-    this.recordHistory(id, 'update', {
-      oldContent: existing.content, oldStatus: existing.status,
-      oldConfidence: existing.confidence, oldTags: existing.tags,
-      newContent: partial.content, newStatus: partial.status,
-    });
 
     return true;
   }
@@ -298,19 +344,33 @@ export class MemoryService {
     const existing = this.db.prepare('SELECT * FROM memories WHERE id = ?').get(id) as RawMemoryRow | undefined;
     if (!existing) return false;
 
-    this.recordHistory(id, 'delete', { oldContent: existing.content, oldStatus: existing.status });
-    this.db.prepare('DELETE FROM memories_fts WHERE id = ?').run(id);
-    if (this.vecAvailable) {
-      try { this.db.prepare('DELETE FROM memories_vec WHERE id = ?').run(id); } catch { /* ok */ }
-    }
-    this.db.prepare('DELETE FROM memories WHERE id = ?').run(id);
+    this.db.transaction(() => {
+      this.recordHistory(id, 'delete', { oldContent: existing.content, oldStatus: existing.status });
+      this.db.prepare('DELETE FROM memories_fts WHERE id = ?').run(id);
+      this.deleteVector(id);
+      this.db.prepare('DELETE FROM memories WHERE id = ?').run(id);
+    })();
     return true;
   }
 
   supersede(oldId: string, newInput: SaveMemoryInput, reason?: string): string {
-    const newId = this.saveSync(newInput);
-    this.db.prepare("UPDATE memories SET status = 'superseded', supersededBy = ? WHERE id = ?").run(newId, oldId);
-    this.recordHistory(oldId, 'supersede', { oldStatus: 'active', newStatus: 'superseded', reason });
+    const existing = this.db.prepare('SELECT * FROM memories WHERE id = ?').get(oldId) as RawMemoryRow | undefined;
+    if (!existing) throw new Error(`Memory not found: ${oldId}`);
+
+    const newId = genId();
+    const timestamp = now();
+    const tags = JSON.stringify(newInput.tags ?? []);
+
+    this.db.transaction(() => {
+      this.insertMemoryRow(newId, newInput, tags, timestamp);
+      this.insertMemoryFts(newId, newInput.content, tags);
+      this.recordHistory(newId, 'create', { newContent: newInput.content, newStatus: 'active' });
+      this.db.prepare("UPDATE memories SET status = 'superseded', supersededBy = ?, updated = ? WHERE id = ?")
+        .run(newId, timestamp, oldId);
+      this.deleteVector(oldId);
+      this.recordHistory(oldId, 'supersede', { oldStatus: 'active', newStatus: 'superseded', reason });
+    })();
+    this.enqueueVectorIndex(newId, newInput.content);
     return newId;
   }
 
@@ -353,6 +413,25 @@ export class MemoryService {
     `).run(memoryId, changeType, data.oldContent ?? null, data.oldStatus ?? null,
       data.oldConfidence ?? null, data.oldTags ?? null, data.newContent ?? null,
       data.newStatus ?? null, data.reason ?? null);
+  }
+
+  private insertMemoryRow(id: string, input: SaveMemoryInput, tags: string, timestamp: string): void {
+    this.db.prepare(`
+      INSERT INTO memories (id, type, content, tags, confidence, importance, created, updated)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, input.type, input.content, tags, input.confidence ?? 1.0, input.importance ?? 0.5, timestamp, timestamp);
+  }
+
+  private insertMemoryFts(id: string, content: string, tags: string): void {
+    this.db.prepare(`
+      INSERT INTO memories_fts (id, content, tags)
+      VALUES (?, ?, ?)
+    `).run(id, content, tags);
+  }
+
+  private replaceMemoryFts(id: string, content: string, tags: string): void {
+    this.db.prepare('DELETE FROM memories_fts WHERE id = ?').run(id);
+    this.insertMemoryFts(id, content, tags);
   }
 
   private toRecord(row: RawMemoryRow): MemoryRecord {

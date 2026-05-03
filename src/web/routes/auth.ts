@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { WebContext } from '../server.ts';
-import { getAuthState, startClaudeOAuth, saveSlackTokens, saveOpenAIKey } from '../../auth/oauth.ts';
+import { getAuthState, startClaudeOAuth, saveSlackTokens, saveOpenAIKey, saveAnthropicKey } from '../../auth/oauth.ts';
+import { sanitizeProviderError } from '../../services/llm.ts';
 
 export function authRoutes(ctx: WebContext): Router {
   const router = Router();
@@ -23,8 +24,12 @@ export function authRoutes(ctx: WebContext): Router {
       res.status(400).json({ error: 'botToken and appToken required' });
       return;
     }
-    saveSlackTokens(botToken, appToken, undefined, ctx.config);
-    res.json({ ok: true, status: 'saved' });
+    try {
+      saveSlackTokens(botToken, appToken, undefined, ctx.config);
+      res.json({ ok: true, status: 'saved' });
+    } catch (err) {
+      res.status(500).json({ error: sanitizeProviderError(err, 'failed to save Slack tokens') });
+    }
   });
 
   router.post('/openai/key', (req, res) => {
@@ -33,8 +38,26 @@ export function authRoutes(ctx: WebContext): Router {
       res.status(400).json({ error: 'apiKey required' });
       return;
     }
-    saveOpenAIKey(apiKey, undefined, ctx.config);
-    res.json({ ok: true, status: 'saved' });
+    try {
+      saveOpenAIKey(apiKey, undefined, ctx.config);
+      res.json({ ok: true, status: 'saved' });
+    } catch (err) {
+      res.status(500).json({ error: sanitizeProviderError(err, 'failed to save OpenAI API key') });
+    }
+  });
+
+  router.post('/anthropic/key', (req, res) => {
+    const { apiKey } = req.body;
+    if (!apiKey) {
+      res.status(400).json({ error: 'apiKey required' });
+      return;
+    }
+    try {
+      saveAnthropicKey(apiKey, undefined, ctx.config);
+      res.json({ ok: true, status: 'saved' });
+    } catch (err) {
+      res.status(500).json({ error: sanitizeProviderError(err, 'failed to save Anthropic API key') });
+    }
   });
 
   return router;

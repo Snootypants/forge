@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import type { WebContext } from '../server.ts';
+import { getLLMProviderRequirements, sanitizeProviderError } from '../../services/llm.ts';
 
 const StoredSettingsSchema = z.object({
   dailyBudget: z.number().finite().nonnegative(),
@@ -58,7 +59,9 @@ function readSettings(ctx: WebContext): StoredSettings {
 }
 
 function writeSettings(ctx: WebContext, settings: StoredSettings): void {
-  fs.writeFileSync(settingsPath(ctx), JSON.stringify(settings, null, 2), { mode: 0o600 });
+  const p = settingsPath(ctx);
+  fs.writeFileSync(p, JSON.stringify(settings, null, 2), { mode: 0o600 });
+  try { fs.chmodSync(p, 0o600); } catch { /* best effort */ }
 }
 
 export function settingsRoutes(ctx: WebContext): Router {
@@ -75,6 +78,8 @@ export function settingsRoutes(ctx: WebContext): Router {
         version: ctx.config.forge.version,
         root: ctx.config.forge.root,
         models: ctx.config.models,
+        llm: ctx.config.llm,
+        llmProviderRequirements: getLLMProviderRequirements(ctx.config),
         memory: memoryPolicy(ctx),
         databases: dbHealth,
       },
@@ -97,8 +102,12 @@ export function settingsRoutes(ctx: WebContext): Router {
       maxConcurrentJobs: body.maxConcurrentJobs ?? current.maxConcurrentJobs,
     };
 
-    writeSettings(ctx, updated);
-    res.json({ saved: true, settings: updated });
+    try {
+      writeSettings(ctx, updated);
+      res.json({ saved: true, settings: updated });
+    } catch (err) {
+      res.status(500).json({ error: sanitizeProviderError(err, 'failed to save settings') });
+    }
   });
 
   return router;

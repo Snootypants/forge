@@ -17,12 +17,20 @@ api:
     app_token:
       env: SLACK_APP_TOKEN
     bot_user_id: ""   # optional — auto-detected on connect
-    channels: []      # optional — empty means respond in all channels bot is in
+    channels: []      # optional allowlist of channel IDs
+    allow_all_channels: false
+    require_mention: true
+    allow_yolo: false # set true only if Slack should drive yolo CLI providers
 
 models:
   default: claude-sonnet-4-6
   architect: claude-opus-4-6
   sentinel: claude-haiku-4-5
+
+llm:
+  provider: claude-cli     # claude-cli | codex-cli | openai-api | anthropic-api
+  model: claude-sonnet-4-6
+  permission_mode: default # default | yolo; applies to CLI providers
 
 paths:
   dbs: ./dbs
@@ -32,7 +40,9 @@ paths:
 services:
   web:
     port: 6800
+    host: 127.0.0.1
     context_window_tokens: 80000
+    debug_prompt_context: false
   daemon:
     port: 6790
 
