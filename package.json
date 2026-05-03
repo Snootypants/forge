@@ -1,21 +1,45 @@
 {
-  "name": "forge",
+  "name": "@snootypants/forge",
   "version": "1.0.0",
-  "private": true,
   "description": "Portable forge platform — agent hosting for ZimaOS and Linux",
+  "license": "MIT",
+  "homepage": "https://github.com/Snootypants/forge#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Snootypants/forge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Snootypants/forge/issues"
+  },
   "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "bin": {
+    "forge": "./dist/cli.js"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=22.6.0"
   },
   "scripts": {
     "build": "npm run typecheck && npm run build:release",
-    "build:release": "rm -rf dist && tsc -p tsconfig.build.json && cp -R src/web/public dist/web/public && cp -R src/db/schemas dist/db/schemas && find dist -name .DS_Store -delete",
+    "build:release": "node scripts/build-release.mjs",
     "typecheck": "tsc",
     "check": "npm run typecheck && npm test",
     "start": "node --experimental-strip-types src/index.ts",
     "start:dist": "node dist/index.js",
     "dev": "node --watch --experimental-strip-types src/index.ts",
-    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\""
+    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
+    "pack:dry-run": "npm pack --dry-run"
   },
   "dependencies": {
     "@anthropic-ai/claude-code": "^2.1.126",

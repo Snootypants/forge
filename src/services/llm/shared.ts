@@ -1,9 +1,12 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import type { ChatMessage, ForgeConfig, LLMRequest } from '../../types.ts';
 import type { CliRunOptions, CliRunResult, ProviderCliRunner } from './types.ts';
 
 const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
+const DEFAULT_WINDOWS_PATHEXT = ['.com', '.exe', '.bat', '.cmd'];
+const WINDOWS_BATCH_EXTENSIONS = new Set(['.bat', '.cmd']);
 type LLMProviderId = ForgeConfig['llm']['provider'];
 type ModelSource = 'configured llm.model' | 'request model' | 'fallback model';
 
@@ -17,6 +20,19 @@ export interface LLMProviderRequirement {
   configuredModel: string | null;
   effectiveModel: string;
   modelCompatible: boolean;
+}
+
+export interface ResolvedCliSpawn {
+  file: string;
+  args: string[];
+  windowsVerbatimArguments?: boolean;
+}
+
+export interface ResolveCliSpawnOptions {
+  env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
+  fileExists?: (file: string) => boolean;
+  pathDelimiter?: string;
+  platform?: NodeJS.Platform;
 }
 
 const PROVIDERS: Record<LLMProviderId, Omit<LLMProviderRequirement, 'provider' | 'configuredModel' | 'effectiveModel' | 'modelCompatible'>> = {
@@ -144,25 +160,40 @@ export function getLLMProviderRequirements(config: ForgeConfig): {
   };
 }
 
-export function buildCliEnv(extra: Record<string, string | null | undefined> = {}): Record<string, string> {
+export function buildCliEnv(
+  extra: Record<string, string | null | undefined> = {},
+  options: { binRoot?: string } = {},
+): Record<string, string> {
   const allowed = [
+    'APPDATA',
+    'CLAUDE_CONFIG_DIR',
     'CODEX_HOME',
+    'ComSpec',
     'HOME',
+    'LOCALAPPDATA',
     'PATH',
+    'PATHEXT',
+    'ProgramData',
     'SHELL',
+    'SystemDrive',
+    'SystemRoot',
     'TERM',
+    'TEMP',
+    'TMP',
     'TMPDIR',
     'USER',
+    'USERPROFILE',
+    'WINDIR',
     'XDG_CONFIG_HOME',
     'XDG_CACHE_HOME',
     'XDG_DATA_HOME',
   ];
   const env: Record<string, string> = {};
   for (const key of allowed) {
-    const val = process.env[key];
+    const val = readEnv(process.env, key);
     if (val !== undefined) env[key] = val;
   }
-  env.PATH = [path.join(process.cwd(), 'node_modules', '.bin'), env.PATH].filter(Boolean).join(path.delimiter);
+  env.PATH = [path.join(options.binRoot ?? process.cwd(), 'node_modules', '.bin'), env.PATH].filter(Boolean).join(path.delimiter);
   for (const [key, val] of Object.entries(extra)) {
     if (val !== undefined && val !== null) env[key] = val;
   }
@@ -173,12 +204,45 @@ export function makeCommandRunner(command: string): ProviderCliRunner {
   return (args, options) => runCommand(command, args, options);
 }
 
+export function resolveCliSpawn(
+  command: string,
+  args: string[],
+  options: ResolveCliSpawnOptions = {},
+): ResolvedCliSpawn {
+  const platform = options.platform ?? process.platform;
+  const normalizedCommand = normalizeCommand(command);
+  if (!normalizedCommand) {
+    throw new Error('CLI command must not be empty');
+  }
+
+  if (platform !== 'win32') {
+    return { file: normalizedCommand, args: [...args] };
+  }
+
+  const resolvedFile = resolveWindowsCommand(normalizedCommand, options);
+  const ext = path.win32.extname(resolvedFile).toLowerCase();
+  if (!WINDOWS_BATCH_EXTENSIONS.has(ext)) {
+    return { file: resolvedFile, args: [...args] };
+  }
+
+  const env = options.env ?? process.env;
+  const shell = readEnv(env, 'ComSpec') ?? readEnv(env, 'COMSPEC') ?? 'cmd.exe';
+  const commandLine = [resolvedFile, ...args].map(quoteWindowsCmdArg).join(' ');
+  return {
+    file: shell,
+    args: ['/d', '/s', '/c', commandLine],
+    windowsVerbatimArguments: true,
+  };
+}
+
 function runCommand(command: string, args: string[], options: CliRunOptions): Promise<CliRunResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const resolved = resolveCliSpawn(command, args, { env: options.env });
+    const child = spawn(resolved.file, resolved.args, {
       cwd: options.cwd,
       env: options.env,
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsVerbatimArguments: resolved.windowsVerbatimArguments,
     });
 
     let stdout = '';
@@ -217,6 +281,65 @@ function runCommand(command: string, args: string[], options: CliRunOptions): Pr
       child.kill('SIGTERM');
     }
   });
+}
+
+function normalizeCommand(command: string): string {
+  const trimmed = command.trim();
+  if (trimmed.length >= 2) {
+    const first = trimmed[0];
+    const last = trimmed[trimmed.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return trimmed.slice(1, -1);
+    }
+  }
+  return trimmed;
+}
+
+function resolveWindowsCommand(command: string, options: ResolveCliSpawnOptions): string {
+  const fileExists = options.fileExists ?? fs.existsSync;
+  const env = options.env ?? process.env;
+  const pathDelimiter = options.pathDelimiter ?? ';';
+  const pathExts = windowsPathExts(env);
+  const hasPath = /[\\/]/.test(command);
+  const roots = hasPath
+    ? ['']
+    : (readEnv(env, 'PATH') ?? '').split(pathDelimiter).filter(Boolean);
+
+  for (const root of roots) {
+    const base = root ? path.win32.join(root, command) : command;
+    for (const candidate of windowsCommandCandidates(base, pathExts)) {
+      if (fileExists(candidate)) return candidate;
+    }
+  }
+
+  return command;
+}
+
+function windowsCommandCandidates(command: string, pathExts: string[]): string[] {
+  if (path.win32.extname(command)) {
+    return [command];
+  }
+  return pathExts.map(ext => `${command}${ext}`);
+}
+
+function windowsPathExts(env: NodeJS.ProcessEnv | Record<string, string | undefined>): string[] {
+  const configured = readEnv(env, 'PATHEXT');
+  const values = configured
+    ? configured.split(';').map(ext => ext.trim()).filter(Boolean)
+    : DEFAULT_WINDOWS_PATHEXT;
+  return values.map(ext => (ext.startsWith('.') ? ext : `.${ext}`).toLowerCase());
+}
+
+function quoteWindowsCmdArg(arg: string): string {
+  return `"${arg.replace(/([()%!^"<>&|])/g, '^$1')}"`;
+}
+
+function readEnv(env: NodeJS.ProcessEnv | Record<string, string | undefined>, key: string): string | undefined {
+  const exact = env[key];
+  if (exact !== undefined) return exact;
+  const lower = key.toLowerCase();
+  const match = Object.keys(env).find(envKey => envKey.toLowerCase() === lower);
+  return match ? env[match] : undefined;
 }
 
 function appendLimited(

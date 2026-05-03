@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { LLMService } from './llm.ts';
-import { makeCommandRunner, sanitizeProviderError } from './llm/shared.ts';
+import { makeCommandRunner, resolveCliSpawn, sanitizeProviderError } from './llm/shared.ts';
 import type { ForgeConfig } from '../types.ts';
 
 function config(overrides: Partial<ForgeConfig> = {}): ForgeConfig {
@@ -420,6 +420,65 @@ test('CLI command runner truncates output and kills subprocess on overflow', asy
   assert.equal(result.stdout, 'abcdefghij');
   assert.equal(result.code, null);
   assert.match(result.stderr, /stdout exceeded 10 bytes/);
+});
+
+test('CLI spawn resolver launches Windows .cmd shims through cmd.exe with quoted arguments', () => {
+  const resolved = resolveCliSpawn('claude', [
+    '--model',
+    'gpt & calc',
+    '%PATH%',
+    'quote "value"',
+  ], {
+    platform: 'win32',
+    env: {
+      PATH: 'C:\\Tools',
+      PATHEXT: '.EXE;.CMD',
+    },
+    fileExists: file => file === 'C:\\Tools\\claude.cmd',
+  });
+
+  assert.equal(resolved.file, 'cmd.exe');
+  assert.equal(resolved.windowsVerbatimArguments, true);
+  assert.deepEqual(resolved.args, [
+    '/d',
+    '/s',
+    '/c',
+    '"C:\\Tools\\claude.cmd" "--model" "gpt ^& calc" "^%PATH^%" "quote ^"value^""',
+  ]);
+});
+
+test('CLI spawn resolver resolves Windows .exe commands without wrapping in a shell', () => {
+  const resolved = resolveCliSpawn('codex', ['exec', 'hello & goodbye'], {
+    platform: 'win32',
+    env: {
+      Path: 'C:\\Bin',
+      PATHEXT: '.CMD;.EXE',
+    },
+    fileExists: file => file === 'C:\\Bin\\codex.exe',
+  });
+
+  assert.deepEqual(resolved, {
+    file: 'C:\\Bin\\codex.exe',
+    args: ['exec', 'hello & goodbye'],
+  });
+});
+
+test('CLI spawn resolver preserves configured command paths with spaces', () => {
+  const resolved = resolveCliSpawn('"C:\\Program Files\\Claude\\claude.cmd"', ['auth', 'status'], {
+    platform: 'win32',
+    env: {
+      ComSpec: 'C:\\Windows\\System32\\cmd.exe',
+    },
+    fileExists: file => file === 'C:\\Program Files\\Claude\\claude.cmd',
+  });
+
+  assert.equal(resolved.file, 'C:\\Windows\\System32\\cmd.exe');
+  assert.deepEqual(resolved.args, [
+    '/d',
+    '/s',
+    '/c',
+    '"C:\\Program Files\\Claude\\claude.cmd" "auth" "status"',
+  ]);
 });
 
 test('Codex CLI provider parses JSON usage when available', async () => {

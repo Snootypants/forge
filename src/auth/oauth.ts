@@ -1,9 +1,9 @@
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveKey, saveEnvValue } from '../config.ts';
 import type { ForgeConfig, KeyRef } from '../types.ts';
-import { getLLMProviderRequirements, sanitizeProviderError, type ProviderAuthRequirement } from '../services/llm/shared.ts';
+import { buildCliEnv, getLLMProviderRequirements, resolveCliSpawn, sanitizeProviderError, type ProviderAuthRequirement } from '../services/llm/shared.ts';
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -31,13 +31,21 @@ export function checkClaudeAuth(config?: ForgeConfig): AuthStatus {
   }
 
   try {
-    const result = execFileSync('claude', ['auth', 'status', '--json'], {
+    const env = claudeEnv();
+    const resolved = resolveCliSpawn('claude', ['auth', 'status', '--json'], { env });
+    const result = spawnSync(resolved.file, resolved.args, {
       encoding: 'utf-8',
       timeout: 5000,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: claudeEnv(),
+      env,
+      windowsVerbatimArguments: resolved.windowsVerbatimArguments,
     });
-    const status = JSON.parse(result);
+
+    if (result.error || result.status !== 0) {
+      return 'not_authenticated';
+    }
+
+    const status = JSON.parse(result.stdout);
     return status.loggedIn ? 'authenticated' : 'not_authenticated';
   } catch {
     return 'not_authenticated';
@@ -78,9 +86,12 @@ export function getAuthState(config?: ForgeConfig): AuthState {
 
 export function startClaudeOAuth(): Promise<{ success: boolean; error?: string }> {
   return new Promise((resolve) => {
-    const child = spawn('claude', ['auth', 'login'], {
+    const env = claudeEnv();
+    const resolved = resolveCliSpawn('claude', ['auth', 'login'], { env });
+    const child = spawn(resolved.file, resolved.args, {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: claudeEnv(),
+      env,
+      windowsVerbatimArguments: resolved.windowsVerbatimArguments,
     });
 
     let stderr = '';
@@ -162,23 +173,5 @@ function saveToken(envName: string, value: string, envPath?: string): void {
 }
 
 function claudeEnv(): NodeJS.ProcessEnv {
-  const allowed = [
-    'CLAUDE_CONFIG_DIR',
-    'HOME',
-    'PATH',
-    'SHELL',
-    'TERM',
-    'TMPDIR',
-    'USER',
-    'XDG_CACHE_HOME',
-    'XDG_CONFIG_HOME',
-    'XDG_DATA_HOME',
-  ];
-  const env: NodeJS.ProcessEnv = {};
-  for (const key of allowed) {
-    const value = process.env[key];
-    if (value !== undefined) env[key] = value;
-  }
-  env.PATH = [path.join(PROJECT_ROOT, 'node_modules', '.bin'), env.PATH].filter(Boolean).join(path.delimiter);
-  return env;
+  return buildCliEnv({}, { binRoot: PROJECT_ROOT });
 }

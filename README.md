@@ -179,23 +179,30 @@ Single process. SQLite for state. External services are optional except for whic
 
 ## Installation
 
-### Prerequisites
+Use Docker for the most portable install. Native installs are supported on macOS and Linux; Windows users should use Docker Desktop or WSL until native Windows has finished CI validation.
+
+For the full install guide, including provider credential caveats, see [docs/install.md](docs/install.md).
+
+### Install Paths
+
+| Path | Status | Use when |
+|------|--------|----------|
+| Docker | Recommended universal path | You want the same runtime shape on macOS, Linux, Windows, NAS hardware, or servers. |
+| npm | Prepared package metadata | Package metadata is prepared for `@snootypants/forge` with the `forge` CLI command. Install with `npm install -g @snootypants/forge` after the package is published. The unscoped `forge` npm name is currently occupied. |
+| git clone | Current source install | You are developing Forge or running from a checked-out repo before npm packaging is published. |
+
+### Source Install
+
+Prerequisites:
 
 - Node.js 22.6+ (Node 22 LTS is the supported runtime line; `.nvmrc` pins this repo to Node 22)
-- One LLM provider: Claude Code CLI, Codex CLI, OpenAI API, or Anthropic API
 - Git
-
-### Quick Start
+- One LLM provider: Claude Code CLI, Codex CLI, OpenAI API, or Anthropic API
 
 ```bash
 git clone https://github.com/Snootypants/forge.git
 cd forge
 npm ci
-```
-
-### Build
-
-```bash
 npm run typecheck   # TypeScript validation only
 npm run build       # Typecheck, then emit dist/
 npm run start:dist  # Run the compiled release artifact
@@ -214,6 +221,27 @@ On first boot:
 4. Skips Slack if no tokens are configured (normal)
 
 Open the web UI and configure auth via the Settings tab.
+
+### Docker
+
+```bash
+docker build -t forge .
+docker volume create forge-dbs forge-identity forge-logs
+
+docker run -d \
+  --name ember \
+  -p 6800:6800 \
+  --mount type=bind,src="$(pwd)/forge.config.yaml",dst=/config/forge.config.yaml,readonly \
+  --mount type=volume,src=forge-dbs,dst=/app/dbs \
+  --mount type=volume,src=forge-identity,dst=/app/identity \
+  --mount type=volume,src=forge-logs,dst=/app/logs \
+  --env-file .env \
+  forge
+```
+
+Docker runs the compiled release artifact, expects config at `/config/forge.config.yaml`, and binds the web UI to `0.0.0.0` inside the container so `-p 6800:6800` works. Use named volumes for `dbs/`, `identity/`, and `logs/` so state and the generated web auth token survive rebuilds.
+
+API providers are the easiest Docker path: pass `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` through `.env` and keep config entries as `env:` references. CLI providers need their CLI binary and credentials inside the container, or carefully mounted host credential directories; do not assume host `~/.claude` or Codex login state is available in Docker.
 
 ### Authentication Setup
 
@@ -428,38 +456,16 @@ sudo systemctl enable forge@ember
 sudo systemctl start forge@ember
 ```
 
-### Running in Docker
+### Docker Operations
 
-```bash
-docker build -t forge .
-```
+The image builds `dist/` in a build stage and runs `node dist/index.js` with production dependencies only. It does not copy `forge.config.yaml`; mount runtime config at `/config/forge.config.yaml`. `.dockerignore` excludes local databases, identity files, logs, `.env*`, `forge.config.yaml`, Claude credentials, editor files, and eval datasets so local state and secrets are not sent to the Docker build context.
 
-```bash
-docker volume create forge-dbs forge-identity forge-logs
-
-docker run -d \
-  --name ember \
-  -p 6800:6800 \
-  --mount type=bind,src="$(pwd)/forge.config.yaml",dst=/config/forge.config.yaml,readonly \
-  --mount type=volume,src=forge-dbs,dst=/app/dbs \
-  --mount type=volume,src=forge-identity,dst=/app/identity \
-  --mount type=volume,src=forge-logs,dst=/app/logs \
-  --env-file .env \
-  forge
-```
-
-The image builds `dist/` in a build stage and runs `node dist/index.js` with production dependencies only. It does not copy `forge.config.yaml`; mount the runtime config at `/config/forge.config.yaml`. Keep secrets in `.env` or in provider-owned CLI auth stores, and keep config key references as `env:` entries instead of inline key values.
-
-`.dockerignore` excludes local databases, identity files, logs, `.env*`, `forge.config.yaml`, Claude credentials, editor files, and eval datasets so local state and secrets are not sent to the Docker build context.
-
-Use named volumes for `dbs/`, `identity/`, and `logs/` so state, identity, and the generated web auth token persist across container rebuilds without host ownership surprises. If you intentionally bind-mount host directories instead, create them first and make them writable by the container user, which is UID/GID `1000:1000` in the base Node image:
+If you intentionally bind-mount host directories instead of named volumes, create them first and make them writable by the container user, which is UID/GID `1000:1000` in the base Node image:
 
 ```bash
 mkdir -p dbs identity logs
 sudo chown -R 1000:1000 dbs identity logs
 ```
-
-The image sets `FORGE_CONFIG=/config/forge.config.yaml` and `FORGE_WEB_HOST=0.0.0.0` so a mounted config and `-p 6800:6800` work; local bare-metal runs still default to `127.0.0.1`.
 
 ### Health and Readiness
 
@@ -703,17 +709,15 @@ Coordinator (:6800) → Ember (:6801) for network tasks
                     → Scribe (:6803) for documentation
 ```
 
-## Deployment Targets
-
-Tested and designed for:
+## Platform Support
 
 | Platform | Notes |
 |----------|-------|
-| **ZimaOS** | Docker or host OS. Shares disk pool with NAS. |
-| **macOS** | Bare metal. Good for development. |
-| **Ubuntu/Debian** | systemd service. Production recommendation. |
-| **Docker** | Any host. Mount volumes for persistence. |
-| **Raspberry Pi 4/5** | Node 22 ARM builds available. Runs fine. |
+| Docker | Recommended universal path on any host that can run Docker. Mount config, secrets, databases, identity, and logs outside the image. |
+| macOS | Supported native source install for development and personal runtime use. |
+| Linux | Supported native source install; Ubuntu/Debian with systemd is the primary bare-metal server path. |
+| Windows | Docker Desktop or WSL is recommended. Native Windows is CI-tracked/experimental until install, build, provider spawning, and runtime behavior are validated. |
+| ZimaOS / NAS / Raspberry Pi | Use Docker where possible; native Linux can work when Node 22 and native dependencies are available for the device. |
 
 ### Hardware Requirements
 
