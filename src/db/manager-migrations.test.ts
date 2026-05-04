@@ -51,7 +51,7 @@ test('messages migration adds legacy prompt and metadata columns before advancin
         id, channel, channelName, user, userName, text, ts, receivedAt,
         prompt_context, llm_metadata, subtype
       )
-      VALUES ('new-1', 'C1', 'general', 'U1', 'Caleb', 'bravo metadata', '2', 2, '{}', '{}', 'bot_message')
+      VALUES ('new-1', 'C1', 'general', 'U1', 'Morgan', 'bravo metadata', '2', 2, '{}', '{}', 'bot_message')
     `).run();
 
     assert.deepEqual(

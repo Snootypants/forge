@@ -129,7 +129,7 @@ Pass-two prompts currently deployed:
 ### Security Regression
 
 ```text
-You are pass-two QA Agent 1: Security Regression. Work in /Users/calebbelshe/forge.
+You are pass-two QA Agent 1: Security Regression. Work in ~/forge.
 Read-only. Do not edit files.
 
 Context: pass one fixed Claude CLI bypassPermissions, web polling redaction/limits,
@@ -150,7 +150,7 @@ tests to add. Also state which prior security items appear resolved.
 
 ```text
 You are pass-two QA Agent 2: Data Integrity and Migration. Work in
-/Users/calebbelshe/forge. Read-only. Do not edit files.
+~/forge. Read-only. Do not edit files.
 
 Context: pass one fixed Slack INSERT OR REPLACE by adding ON CONFLICT DO UPDATE,
 added schema CHECK/FK constraints for new DBs, and wrapped memory mutations in
@@ -170,7 +170,7 @@ to add. Also state which prior data items appear resolved.
 
 ```text
 You are pass-two QA Agent 3: Runtime Behavior and Product Truth. Work in
-/Users/calebbelshe/forge. Read-only. Do not edit files.
+~/forge. Read-only. Do not edit files.
 
 Context: pass one updated README to clarify explicit /remember, Claude CLI, eval
 hit-rate scope, and added health endpoints. Open items include runtime settings not
@@ -189,7 +189,7 @@ tests/docs to add. Also state which prior product/docs items appear resolved.
 
 ```text
 You are pass-two QA Agent 4: Frontend Manual/Static QA. Work in
-/Users/calebbelshe/forge. Read-only. Do not edit files.
+~/forge. Read-only. Do not edit files.
 
 Context: pass one changed public JS/CSS/HTML for API error handling, escaping,
 ARIA/keyboard, tab state, trace disclosure, and responsive breakpoints.
@@ -207,7 +207,7 @@ tests/manual QA to add. Also state which prior frontend items appear resolved.
 
 ```text
 You are pass-two QA Agent 5: Release/Ops Regression. Work in
-/Users/calebbelshe/forge. Read-only. Do not edit files.
+~/forge. Read-only. Do not edit files.
 
 Context: pass one added real dist build, Dockerfile, .dockerignore, GitHub Actions,
 .nvmrc, Node engine update, health/readiness endpoints, and README ops docs.

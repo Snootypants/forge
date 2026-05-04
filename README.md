@@ -29,9 +29,9 @@ That distinction matters. Claude, Codex, OpenAI, Anthropic, and later local mode
 
 The current runtime is usable, but still hardening-stage software. It is good enough for personal infrastructure and active development; the remaining work is around migrations, runtime settings truth, Slack trust policy, Docker defaults, and deeper chat/context parity.
 
-## What I Actually Use This For
+## Example Deployment
 
-I run an instance called Ember on local hardware plugged into my home network. Forge gives her persistent memory, identity, a web chat surface, and Slack access. Provider CLIs or APIs supply the model. Anything more powerful, such as file operations, network actions, or media management, is something the user deliberately layers on through their chosen provider and local setup.
+A typical deployment is a local assistant running on home or office hardware. Forge gives that assistant persistent memory, identity, a web chat surface, and optional Slack access. Provider CLIs or APIs supply the model. Anything more powerful, such as file operations, network actions, or media management, is something the user deliberately layers on through their chosen provider and local setup.
 
 ## What This Is
 
@@ -390,7 +390,7 @@ On first run, forge generates starter templates for all three files. `USER.md` s
 
 Example `identity/IDENTITY.md`:
 ```markdown
-You are Ember, an AI agent managing a home network.
+You are Homebase, an AI agent managing a home network.
 You have access to the local network, Plex, and file management.
 ```
 
@@ -406,11 +406,11 @@ When something breaks, fix it before explaining what happened.
 Forge is designed for running multiple agents on the same machine:
 
 ```bash
-# Agent 1: Ember (network management)
-cp -r forge ~/agents/ember
-cd ~/agents/ember
-# Edit forge.config.yaml: name: ember, port: 6800
-# Edit identity/IDENTITY.md: Ember's personality
+# Agent 1: Homebase (network management)
+cp -r forge ~/agents/homebase
+cd ~/agents/homebase
+# Edit forge.config.yaml: name: homebase, port: 6800
+# Edit identity/IDENTITY.md: Homebase's personality
 npm start
 
 # Agent 2: Atlas (research assistant)
@@ -691,20 +691,20 @@ curl -X POST http://localhost:6800/api/messages \
 
 **Shared Slack workspace** — simplest. All agents in the same workspace, different channels or mentions to route:
 ```
-User → #general → Ember picks up
+User → #general → Homebase picks up
 User → #research → Atlas picks up
-Ember → #agent-ops → Atlas sees it (inter-agent communication)
+Homebase → #agent-ops → Atlas sees it (inter-agent communication)
 ```
 
 **HTTP mesh** — agents call each other's APIs directly:
 ```
-Ember (network) ←→ Atlas (research) ←→ Scribe (documentation)
+Homebase (network) ←→ Atlas (research) ←→ Scribe (documentation)
 Each has its own port, identity, and memory
 ```
 
 **Hub and spoke** — one coordinator agent dispatches to specialists:
 ```
-Coordinator (:6800) → Ember (:6801) for network tasks
+Coordinator (:6800) → Homebase (:6801) for network tasks
                     → Atlas (:6802) for research tasks
                     → Scribe (:6803) for documentation
 ```

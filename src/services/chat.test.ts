@@ -26,13 +26,13 @@ function fakeMemory(): MemoryService {
 
 test('handleMemoryCommand saves only explicit /remember content', async () => {
   const memory = fakeMemory();
-  const result = await handleMemoryCommand(memory, '/remember Caleb prefers terse status updates');
+  const result = await handleMemoryCommand(memory, '/remember Morgan prefers terse status updates');
 
   assert.equal(result?.reply, 'Remembered. Memory ID: mem-1');
   assert.equal(result?.memoryId, 'mem-1');
   assert.deepEqual((memory as unknown as { _state: { saved: unknown[] } })._state.saved, [{
     type: 'chat',
-    content: 'Caleb prefers terse status updates',
+    content: 'Morgan prefers terse status updates',
     tags: ['chat', 'explicit'],
     confidence: 1.0,
     importance: 0.7,
@@ -57,7 +57,7 @@ test('buildChatContext treats configured assistant name as assistant role', () =
           if (call === 1) {
             return [
               { userName: 'forge', text: 'Earlier assistant reply', ts: '1' },
-              { userName: 'Caleb', text: 'Current message', ts: '2' },
+              { userName: 'Morgan', text: 'Current message', ts: '2' },
             ];
           }
           return [];
@@ -74,7 +74,7 @@ test('buildChatContext treats configured assistant name as assistant role', () =
     channel: 'C123',
     threadTs: '1',
     currentMessage: 'Current message',
-    userName: 'Caleb',
+    userName: 'Morgan',
     now: new Date('2026-05-02T00:00:00.000Z'),
   });
 

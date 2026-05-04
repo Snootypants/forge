@@ -18,7 +18,7 @@ test('messages FTS triggers track inserts, updates, and deletes', () => {
   try {
     db.prepare(`
       INSERT INTO messages (id, channel, channelName, user, userName, text, ts, receivedAt)
-      VALUES ('msg-1', 'web', 'web', 'user', 'Caleb', 'alpha bravo', '1', 1)
+      VALUES ('msg-1', 'web', 'web', 'user', 'Morgan', 'alpha bravo', '1', 1)
     `).run();
     assert.deepEqual(search(db, 'alpha'), [{ id: 'msg-1', text: 'alpha bravo' }]);
 

@@ -28,7 +28,7 @@ function makeCtx(db = makeDb(), overrides: Partial<Record<keyof WebContext, unkn
   return {
     config: {
       forge: { name: 'forge', version: '1.0.0', root: '.' },
-      user: { name: 'Caleb' },
+      user: { name: 'Morgan' },
       api: {},
       models: { default: 'test', architect: 'test', sentinel: 'test' },
       llm: { provider: 'claude-cli', model: 'test', permission_mode: 'default' },

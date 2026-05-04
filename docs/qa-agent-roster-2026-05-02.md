@@ -20,7 +20,7 @@ Model policy: no explicit model override was set on any agent; each inherited th
 All agents received this context:
 
 ```text
-We are working in /Users/calebbelshe/forge on a TypeScript/Node self-hosted memory/chat agent substrate. Recent changes renamed ~/forge-zima to ~/forge, made the app provider-agnostic, narrowed core DB boot to memory/messages/all/chat-history/notepad/logs, added notepad.sql, changed Slack trust/yolo defaults, and updated README/docs. The working tree is dirty; do not edit.
+We are working in ~/forge on a TypeScript/Node self-hosted memory/chat agent substrate. Recent changes renamed ~/forge-zima to ~/forge, made the app provider-agnostic, narrowed core DB boot to memory/messages/all/chat-history/notepad/logs, added notepad.sql, changed Slack trust/yolo defaults, and updated README/docs. The working tree is dirty; do not edit.
 ```
 
 ## Prompts
