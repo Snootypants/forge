@@ -31,6 +31,8 @@ logs/
 
 # Local feedback and external tester notes
 feedback/
+research/
+docs/qa-runs/
 
 # OS / editor
 .DS_Store
