@@ -4,6 +4,7 @@ dist/
 
 # Databases (runtime state)
 dbs/*.db
+dbs/*.db-journal
 dbs/*.db-wal
 dbs/*.db-shm
 
@@ -27,6 +28,9 @@ eval/results.json
 # Logs
 *.log
 logs/
+
+# Local feedback and external tester notes
+feedback/
 
 # OS / editor
 .DS_Store

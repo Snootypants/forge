@@ -1,6 +1,6 @@
 {
-  "name": "@snootypants/forge",
-  "version": "1.0.0",
+  "name": "@35bird/forge",
+  "version": "0.1.0",
   "description": "Portable forge platform — agent hosting for ZimaOS and Linux",
   "license": "MIT",
   "homepage": "https://github.com/Snootypants/forge#readme",
@@ -17,10 +17,11 @@
     ".": "./dist/index.js"
   },
   "bin": {
-    "forge": "./dist/cli.js"
+    "forge": "dist/cli.js"
   },
   "files": [
     "dist/",
+    "docs/install.md",
     "README.md",
     "LICENSE"
   ],
@@ -39,6 +40,8 @@
     "start:dist": "node dist/index.js",
     "dev": "node --watch --experimental-strip-types src/index.ts",
     "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run check && npm run build",
     "pack:dry-run": "npm pack --dry-run"
   },
   "dependencies": {

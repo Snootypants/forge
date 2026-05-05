@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import type Database from 'better-sqlite3';
 import type { MemoryRecord } from '../types.ts';
 import type { EmbedService } from './embed.ts';
+import { sanitizeProviderError } from './llm/shared.ts';
 
 const moduleRequire = createRequire(import.meta.url);
 
@@ -28,6 +29,19 @@ export interface SearchResult extends MemoryRecord {
   snippet?: string;
 }
 
+export interface MemoryVectorBackfillResult {
+  scanned: number;
+  indexed: number;
+  skipped: number;
+  staleDeleted: number;
+}
+
+export interface MemoryRuntimeStatus {
+  vectorTableAvailable: boolean;
+  embeddingAvailable: boolean;
+  hybridSearchActive: boolean;
+}
+
 export class MemoryService {
   private db: Database.Database;
   private embedService: EmbedService | null = null;
@@ -50,7 +64,12 @@ export class MemoryService {
           embedding float[1536]
         );
       `);
-      console.log('[memory] sqlite-vec loaded — hybrid search enabled');
+      console.log(
+        this.canUseVectors()
+          ? '[memory] sqlite-vec loaded — hybrid search enabled'
+          : '[memory] sqlite-vec loaded — embeddings unavailable, FTS5 only',
+      );
+      this.enqueueVectorBackfill();
       return true;
     } catch (err) {
       console.warn('[memory] sqlite-vec not available — FTS5 only');
@@ -66,7 +85,6 @@ export class MemoryService {
 
     this.db.transaction(() => {
       this.insertMemoryRow(id, input, tags, timestamp);
-      this.insertMemoryFts(id, input.content, tags);
       this.recordHistory(id, 'create', { newContent: input.content, newStatus: 'active' });
     })();
 
@@ -82,7 +100,6 @@ export class MemoryService {
 
     this.db.transaction(() => {
       this.insertMemoryRow(id, input, tags, timestamp);
-      this.insertMemoryFts(id, input.content, tags);
       this.recordHistory(id, 'create', { newContent: input.content, newStatus: 'active' });
     })();
     this.enqueueVectorIndex(id, input.content);
@@ -91,6 +108,22 @@ export class MemoryService {
 
   async flushVectorIndexQueue(): Promise<void> {
     await this.vectorQueue;
+  }
+
+  async backfillVectors(limit = 500): Promise<MemoryVectorBackfillResult> {
+    if (!this.canUseVectors()) {
+      return { scanned: 0, indexed: 0, skipped: 0, staleDeleted: 0 };
+    }
+
+    const job = this.vectorQueue.then(() => this.runVectorBackfill(limit));
+    this.vectorQueue = job.then(
+      () => undefined,
+      err => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[memory] Vector backfill failed: ${msg}`);
+      },
+    );
+    return job;
   }
 
   get(id: string): MemoryRecord | null {
@@ -107,12 +140,17 @@ export class MemoryService {
       return ftsResults;
     }
 
-    const embedding = await this.embedService.embed(query);
-    if (!embedding) return ftsResults;
+    try {
+      const embedding = await this.embedService.embed(query);
+      if (!embedding) return ftsResults;
 
-    const vecResults = this.searchVector(embedding, limit);
+      const vecResults = this.searchVector(embedding, limit);
 
-    return this.mergeResults(vecResults, ftsResults, limit);
+      return this.mergeResults(vecResults, ftsResults, limit);
+    } catch (err) {
+      console.warn(`[memory] Hybrid vector search unavailable; using FTS only: ${sanitizeProviderError(err)}`);
+      return ftsResults;
+    }
   }
 
   search(query: string, limit = 10): SearchResult[] {
@@ -195,7 +233,7 @@ export class MemoryService {
 
       return results;
     } catch (err) {
-      console.error('[memory] Vector search error:', err);
+      console.warn(`[memory] Vector search error; using FTS/vector fallback: ${sanitizeProviderError(err)}`);
       return [];
     }
   }
@@ -250,6 +288,14 @@ export class MemoryService {
     return this.vecAvailable && this.embedService?.available === true;
   }
 
+  runtimeStatus(): MemoryRuntimeStatus {
+    return {
+      vectorTableAvailable: this.vecAvailable,
+      embeddingAvailable: this.embedService?.available === true,
+      hybridSearchActive: this.canUseVectors(),
+    };
+  }
+
   private enqueueVectorIndex(id: string, content: string): void {
     if (!this.canUseVectors()) return;
 
@@ -258,6 +304,71 @@ export class MemoryService {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[memory] Vector indexing failed for ${id}: ${msg}`);
     });
+  }
+
+  private enqueueVectorBackfill(): void {
+    if (!this.canUseVectors()) return;
+
+    const job = this.vectorQueue.then(() => this.runVectorBackfill(500));
+    this.vectorQueue = job.then(
+      () => undefined,
+      err => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[memory] Vector backfill failed: ${msg}`);
+      },
+    );
+  }
+
+  private async runVectorBackfill(limit: number): Promise<MemoryVectorBackfillResult> {
+    const staleDeleted = this.deleteStaleVectors();
+    const rows = this.db.prepare(`
+      SELECT m.id, m.content
+      FROM memories m
+      LEFT JOIN memories_vec v ON v.id = m.id
+      WHERE m.status = 'active'
+      AND v.id IS NULL
+      ORDER BY m.updated DESC
+      LIMIT ?
+    `).all(limit) as Array<Pick<RawMemoryRow, 'id' | 'content'>>;
+
+    let indexed = 0;
+    let skipped = 0;
+
+    for (const row of rows) {
+      const embedding = await this.embedService?.embed(row.content);
+      if (!embedding) {
+        skipped++;
+        continue;
+      }
+
+      const current = this.db.prepare('SELECT content, status FROM memories WHERE id = ?').get(row.id) as
+        | Pick<RawMemoryRow, 'content' | 'status'>
+        | undefined;
+
+      if (current?.status === 'active' && current.content === row.content) {
+        this.storeVector(row.id, embedding);
+        indexed++;
+      } else {
+        skipped++;
+      }
+    }
+
+    return { scanned: rows.length, indexed, skipped, staleDeleted };
+  }
+
+  private deleteStaleVectors(): number {
+    if (!this.vecAvailable) return 0;
+    try {
+      const result = this.db.prepare(`
+        DELETE FROM memories_vec
+        WHERE id NOT IN (
+          SELECT id FROM memories WHERE status = 'active'
+        )
+      `).run();
+      return result.changes;
+    } catch {
+      return 0;
+    }
   }
 
   private async indexActiveVector(id: string, content: string): Promise<void> {
@@ -317,11 +428,6 @@ export class MemoryService {
     this.db.transaction(() => {
       this.db.prepare(`UPDATE memories SET ${sets.join(', ')} WHERE id = ?`).run(...params);
 
-      if (partial.content !== undefined || partial.tags !== undefined) {
-        const newContent = partial.content ?? existing.content;
-        const newTags = partial.tags !== undefined ? JSON.stringify(partial.tags) : existing.tags;
-        this.replaceMemoryFts(id, newContent, newTags);
-      }
       if (partial.content !== undefined || partial.status !== undefined) {
         this.deleteVector(id);
       }
@@ -346,7 +452,6 @@ export class MemoryService {
 
     this.db.transaction(() => {
       this.recordHistory(id, 'delete', { oldContent: existing.content, oldStatus: existing.status });
-      this.db.prepare('DELETE FROM memories_fts WHERE id = ?').run(id);
       this.deleteVector(id);
       this.db.prepare('DELETE FROM memories WHERE id = ?').run(id);
     })();
@@ -363,7 +468,6 @@ export class MemoryService {
 
     this.db.transaction(() => {
       this.insertMemoryRow(newId, newInput, tags, timestamp);
-      this.insertMemoryFts(newId, newInput.content, tags);
       this.recordHistory(newId, 'create', { newContent: newInput.content, newStatus: 'active' });
       this.db.prepare("UPDATE memories SET status = 'superseded', supersededBy = ?, updated = ? WHERE id = ?")
         .run(newId, timestamp, oldId);
@@ -374,7 +478,15 @@ export class MemoryService {
     return newId;
   }
 
-  stats(): { total: number; active: number; superseded: number; archived: number; vecEnabled: boolean } {
+  stats(): {
+    total: number;
+    active: number;
+    superseded: number;
+    archived: number;
+    vecEnabled: boolean;
+    embeddingAvailable: boolean;
+    hybridSearchActive: boolean;
+  } {
     const row = this.db.prepare(`
       SELECT
         COUNT(*) as total,
@@ -383,7 +495,13 @@ export class MemoryService {
         SUM(CASE WHEN status = 'archived' THEN 1 ELSE 0 END) as archived
       FROM memories
     `).get() as { total: number; active: number; superseded: number; archived: number };
-    return { ...row, vecEnabled: this.vecAvailable };
+    const runtime = this.runtimeStatus();
+    return {
+      ...row,
+      vecEnabled: runtime.vectorTableAvailable,
+      embeddingAvailable: runtime.embeddingAvailable,
+      hybridSearchActive: runtime.hybridSearchActive,
+    };
   }
 
   history(memoryId: string): Array<{
@@ -420,18 +538,6 @@ export class MemoryService {
       INSERT INTO memories (id, type, content, tags, confidence, importance, created, updated)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, input.type, input.content, tags, input.confidence ?? 1.0, input.importance ?? 0.5, timestamp, timestamp);
-  }
-
-  private insertMemoryFts(id: string, content: string, tags: string): void {
-    this.db.prepare(`
-      INSERT INTO memories_fts (id, content, tags)
-      VALUES (?, ?, ?)
-    `).run(id, content, tags);
-  }
-
-  private replaceMemoryFts(id: string, content: string, tags: string): void {
-    this.db.prepare('DELETE FROM memories_fts WHERE id = ?').run(id);
-    this.insertMemoryFts(id, content, tags);
   }
 
   private toRecord(row: RawMemoryRow): MemoryRecord {

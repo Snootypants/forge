@@ -54,7 +54,7 @@ jobs:
           forge:
             name: forge-ci
             version: "1.0.0"
-            root: /app
+            root: /config
 
           user:
             name: ci
@@ -113,10 +113,10 @@ jobs:
             --name forge-ci \
             -p 6800:6800 \
             --mount type=bind,src="$RUNNER_TEMP/forge-smoke/forge.config.yaml",dst=/config/forge.config.yaml,readonly \
-            --mount type=volume,src=forge-ci-dbs,dst=/app/dbs \
-            --mount type=volume,src=forge-ci-identity,dst=/app/identity \
-            --mount type=volume,src=forge-ci-logs,dst=/app/logs \
-            forge:ci web
+            --mount type=volume,src=forge-ci-dbs,dst=/config/dbs \
+            --mount type=volume,src=forge-ci-identity,dst=/config/identity \
+            --mount type=volume,src=forge-ci-logs,dst=/config/logs \
+            forge:ci
 
           for i in {1..30}; do
             if curl -fsS http://127.0.0.1:6800/readyz; then

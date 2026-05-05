@@ -1,10 +1,10 @@
 import type Database from 'better-sqlite3';
-import type { MemoryService } from './memory.ts';
+import type { MemoryService, SearchResult } from './memory.ts';
 import type { ChatMessage } from '../types.ts';
 
 interface ChatContextInput {
   messagesDb?: Database.Database;
-  memory: Pick<MemoryService, 'search'>;
+  memory: Pick<MemoryService, 'search'> & Partial<Pick<MemoryService, 'searchHybrid'>>;
   identity: string;
   assistantName: string;
   currentMessage: string;
@@ -65,9 +65,19 @@ export async function handleMemoryCommand(
 }
 
 export function buildChatContext(input: ChatContextInput): BuiltChatContext {
+  return buildChatContextFromMemories(input, input.memory.search(input.currentMessage, 5));
+}
+
+export async function buildChatContextAsync(input: ChatContextInput): Promise<BuiltChatContext> {
+  const memories = input.memory.searchHybrid
+    ? await input.memory.searchHybrid(input.currentMessage, 5)
+    : input.memory.search(input.currentMessage, 5);
+  return buildChatContextFromMemories(input, memories);
+}
+
+function buildChatContextFromMemories(input: ChatContextInput, memories: SearchResult[]): BuiltChatContext {
   const sections: string[] = [input.identity];
 
-  const memories = input.memory.search(input.currentMessage, 5);
   if (memories.length > 0) {
     sections.push('## Relevant Memories');
     for (const mem of memories) {

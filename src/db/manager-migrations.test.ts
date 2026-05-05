@@ -111,7 +111,74 @@ test('all database migration backfills existing documents into documents_fts', (
   }
 });
 
+test('memory migration rebuilds memories_fts to remove stale and duplicate rows', () => {
+  const dbDir = mkdtempSync(path.join(tmpdir(), 'forge-memory-migrate-'));
+  const dbPath = path.join(dbDir, 'memory.db');
+
+  const legacy = new Database(dbPath);
+  legacy.exec(`
+    CREATE TABLE memories (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      content TEXT NOT NULL,
+      tags TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'active',
+      confidence REAL NOT NULL DEFAULT 1.0,
+      importance REAL NOT NULL DEFAULT 0.5,
+      accessCount INTEGER NOT NULL DEFAULT 0,
+      created TEXT NOT NULL,
+      updated TEXT NOT NULL,
+      supersededBy TEXT
+    );
+    CREATE VIRTUAL TABLE memories_fts USING fts5(
+      id,
+      content,
+      tags,
+      tokenize='porter'
+    );
+    INSERT INTO memories(id, type, content, tags, created, updated)
+    VALUES ('mem-1', 'preference', 'current bravo text', '["current"]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    INSERT INTO memories_fts(id, content, tags)
+    VALUES
+      ('mem-1', 'stale alpha text', '["old"]'),
+      ('mem-1', 'duplicate alpha text', '["old"]'),
+      ('ghost', 'orphan ghost text', '[]');
+    PRAGMA user_version = 1;
+  `);
+  legacy.close();
+
+  const manager = new DatabaseManager(dbDir);
+
+  try {
+    const db = manager.open('memory');
+
+    assert.equal(countRows(db, 'memories_fts'), 1);
+    assert.deepEqual(
+      db.prepare(`
+        SELECT id, content
+        FROM memories_fts
+        WHERE memories_fts MATCH 'bravo'
+      `).get(),
+      { id: 'mem-1', content: 'current bravo text' },
+    );
+    const stale = db.prepare(`
+        SELECT count(*) AS count
+        FROM memories_fts
+        WHERE memories_fts MATCH 'alpha OR ghost'
+      `).get() as { count: number };
+    assert.equal(stale.count, 0);
+  } finally {
+    manager.closeAll();
+    rmSync(dbDir, { recursive: true, force: true });
+  }
+});
+
 function columnNames(db: ReturnType<DatabaseManager['open']>, table: string): Set<string> {
   const rows = db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name: string }>;
   return new Set(rows.map(row => row.name));
+}
+
+function countRows(db: ReturnType<DatabaseManager['open']>, table: string): number {
+  const row = db.prepare(`SELECT count(*) AS count FROM ${table}`).get() as { count: number };
+  return row.count;
 }

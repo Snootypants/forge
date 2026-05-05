@@ -6,8 +6,11 @@ export { CodexCliProvider } from './llm/providers/codex-cli.ts';
 export { OpenAIApiProvider } from './llm/providers/openai-api.ts';
 export {
   formatProviderError,
+  getLLMModelCatalog,
   getLLMProviderRequirements,
+  isCatalogProviderModel,
   providerDefaultModel,
+  resolveProviderCommand,
   sanitizeProviderError,
   validateProviderModel,
 } from './llm/shared.ts';

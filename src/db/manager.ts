@@ -158,34 +158,28 @@ export class DatabaseManager {
   private backfillIndexes(db: Database.Database, name: DbName): void {
     if (name === 'memory') {
       db.exec(`
+        DELETE FROM memories_fts;
         INSERT INTO memories_fts(id, content, tags)
         SELECT m.id, m.content, m.tags
-        FROM memories m
-        WHERE NOT EXISTS (
-          SELECT 1 FROM memories_fts f WHERE f.id = m.id
-        );
+        FROM memories m;
       `);
     }
 
     if (name === 'messages') {
       db.exec(`
+        DELETE FROM messages_fts;
         INSERT INTO messages_fts(text, userName, channelName, id, channel, ts, receivedAt)
         SELECT m.text, m.userName, m.channelName, m.id, m.channel, m.ts, m.receivedAt
-        FROM messages m
-        WHERE NOT EXISTS (
-          SELECT 1 FROM messages_fts f WHERE f.id = m.id
-        );
+        FROM messages m;
       `);
     }
 
     if (name === 'all') {
       db.exec(`
+        DELETE FROM documents_fts;
         INSERT INTO documents_fts(rowid, source, content, source_id)
         SELECT d.id, d.source, d.content, d.source_id
-        FROM documents d
-        WHERE NOT EXISTS (
-          SELECT 1 FROM documents_fts f WHERE f.rowid = d.id
-        );
+        FROM documents d;
       `);
     }
   }

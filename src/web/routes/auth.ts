@@ -25,7 +25,7 @@ export function authRoutes(ctx: WebContext): Router {
       return;
     }
     try {
-      saveSlackTokens(botToken, appToken, undefined, ctx.config);
+      saveSlackTokens(botToken, appToken, ctx.resolved.envPath, ctx.config);
       res.json({ ok: true, status: 'saved' });
     } catch (err) {
       res.status(500).json({ error: sanitizeProviderError(err, 'failed to save Slack tokens') });
@@ -39,7 +39,7 @@ export function authRoutes(ctx: WebContext): Router {
       return;
     }
     try {
-      saveOpenAIKey(apiKey, undefined, ctx.config);
+      saveOpenAIKey(apiKey, ctx.resolved.envPath, ctx.config);
       res.json({ ok: true, status: 'saved' });
     } catch (err) {
       res.status(500).json({ error: sanitizeProviderError(err, 'failed to save OpenAI API key') });
@@ -53,7 +53,7 @@ export function authRoutes(ctx: WebContext): Router {
       return;
     }
     try {
-      saveAnthropicKey(apiKey, undefined, ctx.config);
+      saveAnthropicKey(apiKey, ctx.resolved.envPath, ctx.config);
       res.json({ ok: true, status: 'saved' });
     } catch (err) {
       res.status(500).json({ error: sanitizeProviderError(err, 'failed to save Anthropic API key') });

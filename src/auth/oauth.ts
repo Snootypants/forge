@@ -14,6 +14,7 @@ export interface AuthState {
   anthropic: AuthStatus;
   slack: AuthStatus;
   openai: AuthStatus;
+  codex: AuthStatus;
   selectedProvider: ForgeConfig['llm']['provider'];
   providers: ProviderAuthStatus[];
 }
@@ -69,18 +70,40 @@ export function checkOpenAIAuth(config?: ForgeConfig): AuthStatus {
   return 'not_authenticated';
 }
 
+export function checkCodexAuth(config?: ForgeConfig): AuthStatus {
+  if (resolveConfiguredKey(config?.api.openai, 'OPENAI_API_KEY')) return 'authenticated';
+
+  try {
+    const env = buildCliEnv();
+    const command = config?.llm.provider === 'codex-cli' ? config.llm.command ?? 'codex' : 'codex';
+    const resolved = resolveCliSpawn(command, ['login', 'status'], { env });
+    const result = spawnSync(resolved.file, resolved.args, {
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+      windowsVerbatimArguments: resolved.windowsVerbatimArguments,
+    });
+    return result.error || result.status !== 0 ? 'not_authenticated' : 'authenticated';
+  } catch {
+    return 'not_authenticated';
+  }
+}
+
 export function getAuthState(config?: ForgeConfig): AuthState {
   const claude = checkClaudeAuth(config);
   const anthropic = checkAnthropicAuth(config);
   const openai = checkOpenAIAuth(config);
+  const codex = checkCodexAuth(config);
   const selectedProvider = config?.llm.provider ?? 'claude-cli';
   return {
     claude,
     anthropic,
     slack: checkSlackAuth(config),
     openai,
+    codex,
     selectedProvider,
-    providers: getProviderAuthStatuses(config, { claude, anthropic, openai }),
+    providers: getProviderAuthStatuses(config, { claude, anthropic, openai, codex }),
   };
 }
 
@@ -131,7 +154,7 @@ export function saveAnthropicKey(apiKey: string, envPath?: string, config?: Forg
 
 function getProviderAuthStatuses(
   config: ForgeConfig | undefined,
-  statuses: { claude: AuthStatus; anthropic: AuthStatus; openai: AuthStatus },
+  statuses: { claude: AuthStatus; anthropic: AuthStatus; openai: AuthStatus; codex: AuthStatus },
 ): ProviderAuthStatus[] {
   if (!config) {
     return [];
@@ -147,7 +170,7 @@ function getProviderAuthStatuses(
 
 function statusForRequirement(
   requirement: ProviderAuthRequirement,
-  statuses: { claude: AuthStatus; anthropic: AuthStatus; openai: AuthStatus },
+  statuses: { claude: AuthStatus; anthropic: AuthStatus; openai: AuthStatus; codex: AuthStatus },
 ): AuthStatus {
   switch (requirement) {
     case 'anthropic-api-key':
@@ -156,6 +179,8 @@ function statusForRequirement(
       return statuses.openai;
     case 'claude-oauth-or-anthropic-key':
       return statuses.anthropic === 'authenticated' ? statuses.anthropic : statuses.claude;
+    case 'codex-login-or-openai-api-key':
+      return statuses.openai === 'authenticated' ? statuses.openai : statuses.codex;
     case 'none':
       return 'authenticated';
     default:

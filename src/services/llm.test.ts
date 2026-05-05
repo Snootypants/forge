@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { LLMService } from './llm.ts';
-import { makeCommandRunner, resolveCliSpawn, sanitizeProviderError } from './llm/shared.ts';
+import { buildCliEnv, getLLMModelCatalog, makeCommandRunner, providerDefaultModel, resolveCliSpawn, resolveProviderCommand, sanitizeProviderError } from './llm/shared.ts';
 import type { ForgeConfig } from '../types.ts';
 
 function config(overrides: Partial<ForgeConfig> = {}): ForgeConfig {
@@ -138,6 +141,56 @@ test('Claude CLI provider maps yolo permission mode explicitly', async () => {
   assert.equal(run.args[run.args.indexOf('--permission-mode') + 1], 'bypassPermissions');
 });
 
+test('Claude CLI provider uses request permission mode over configured default', async () => {
+  let captured: { args: string[] } | null = null;
+  const service = new LLMService(config({
+    llm: { provider: 'claude-cli', model: 'claude-test', permission_mode: 'default' },
+  }), {
+    runClaudeCli: async (args) => {
+      captured = { args };
+      return {
+        code: 0,
+        stderr: '',
+        stdout: JSON.stringify({ result: 'ok', usage: { input_tokens: 1, output_tokens: 2 } }),
+      };
+    },
+  });
+
+  await service.complete({
+    system: 'system prompt',
+    messages: [{ role: 'user', content: 'hello' }],
+    permissionMode: 'yolo',
+  });
+
+  const run = expectCaptured(captured);
+  assert.equal(run.args.includes('--permission-mode'), true);
+  assert.equal(run.args[run.args.indexOf('--permission-mode') + 1], 'bypassPermissions');
+});
+
+test('Claude CLI provider passes selected 1M alias exactly', async () => {
+  let captured: { args: string[] } | null = null;
+  const service = new LLMService(config(), {
+    runClaudeCli: async (args) => {
+      captured = { args };
+      return {
+        code: 0,
+        stderr: '',
+        stdout: JSON.stringify({ result: 'ok', usage: { input_tokens: 1, output_tokens: 2 } }),
+      };
+    },
+  });
+
+  const response = await service.complete({
+    system: 'system prompt',
+    model: 'opus[1m]',
+    messages: [{ role: 'user', content: 'hello' }],
+  });
+
+  assert.equal(response.model, 'opus[1m]');
+  const run = expectCaptured(captured);
+  assert.equal(run.args[run.args.indexOf('--model') + 1], 'opus[1m]');
+});
+
 test('Codex CLI provider receives normalized prompt and yolo flags', async () => {
   let captured:
     | { args: string[]; env: Record<string, string>; stdin: string; cwd?: string }
@@ -202,6 +255,28 @@ test('Codex CLI provider receives normalized prompt and yolo flags', async () =>
   );
 });
 
+test('Codex CLI provider uses request permission mode over configured default', async () => {
+  let captured: { args: string[] } | null = null;
+  const service = new LLMService(config({
+    api: { openai: { value: 'configured-openai-key' } },
+    llm: { provider: 'codex-cli', model: 'gpt-test', permission_mode: 'default' },
+  }), {
+    runCodexCli: async (args) => {
+      captured = { args };
+      return { code: 0, stderr: '', stdout: 'ok\n' };
+    },
+  });
+
+  await service.complete({
+    system: 'system prompt',
+    messages: [{ role: 'user', content: 'hello' }],
+    permissionMode: 'yolo',
+  });
+
+  const run = expectCaptured(captured);
+  assert.ok(run.args.includes('--dangerously-bypass-approvals-and-sandbox'));
+});
+
 test('OpenAI API provider sends structured role-preserving Responses input', async () => {
   let captured: any = null;
   const service = new LLMService(config({
@@ -255,7 +330,7 @@ test('OpenAI API provider rejects incompatible configured Claude model', () => {
         },
       },
     }),
-    /configured llm\.model "claude-sonnet-4-6" is not compatible with OpenAI API/,
+    /configured llm\.model "claude-sonnet-4-6" is not available for OpenAI API/,
   );
 });
 
@@ -399,10 +474,35 @@ test('Anthropic API provider requires auth and rejects incompatible request mode
         model: 'gpt-5.2',
         messages: [{ role: 'user', content: 'hello' }],
       }),
-      /request model "gpt-5.2" is not compatible with Anthropic API/,
+      /request model "gpt-5.2" is not available for Anthropic API/,
     );
   } finally {
     restoreEnv(prior);
+  }
+});
+
+test('CLI env uses the package bin path instead of a temporary cwd shim', () => {
+  const priorCwd = process.cwd();
+  const priorPath = process.env.PATH;
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-cli-path-'));
+  const cwdShim = path.join(temp, 'node_modules', '.bin');
+  fs.mkdirSync(cwdShim, { recursive: true });
+
+  try {
+    process.chdir(temp);
+    process.env.PATH = '/usr/bin';
+    const env = buildCliEnv();
+    const firstPath = env.PATH.split(path.delimiter)[0];
+    assert.notEqual(firstPath, cwdShim);
+    assert.equal(env.PATH.includes(cwdShim), false);
+  } finally {
+    process.chdir(priorCwd);
+    if (priorPath === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = priorPath;
+    }
+    fs.rmSync(temp, { recursive: true, force: true });
   }
 });
 
@@ -503,8 +603,83 @@ test('Codex CLI provider parses JSON usage when available', async () => {
   assert.equal(response.outputTokens, 4);
 });
 
+test('LLMService can switch providers per request without reusing incompatible configured model', async () => {
+  let captured: { args: string[] } | null = null;
+  const service = new LLMService(config({
+    llm: { provider: 'claude-cli', model: 'claude-test', permission_mode: 'default' },
+    api: { openai: { value: 'configured-openai-key' } },
+  }), {
+    runCodexCli: async (args) => {
+      captured = { args };
+      return { code: 0, stderr: '', stdout: 'hello from codex\n' };
+    },
+    runClaudeCli: async () => {
+      throw new Error('should not call Claude');
+    },
+  });
+
+  const response = await service.complete({
+    provider: 'codex-cli',
+    model: 'gpt-5.2',
+    system: 'system prompt',
+    messages: [{ role: 'user', content: 'hello' }],
+  });
+
+  assert.equal(response.provider, 'codex-cli');
+  assert.equal(response.model, 'gpt-5.2');
+  const run = expectCaptured(captured);
+  assert.deepEqual(run.args.slice(0, 3), ['exec', '--model', 'gpt-5.2']);
+});
+
+test('LLMService rejects stale prefix-looking request models outside the catalog', async () => {
+  const service = new LLMService(config({
+    llm: { provider: 'claude-cli', model: 'claude-test', permission_mode: 'default' },
+    api: { openai: { value: 'configured-openai-key' } },
+  }), {
+    runCodexCli: async () => {
+      throw new Error('should not call Codex');
+    },
+  });
+
+  await assert.rejects(
+    service.complete({
+      provider: 'codex-cli',
+      model: 'gpt-5.5',
+      system: 'system prompt',
+      messages: [{ role: 'user', content: 'hello' }],
+    }),
+    /request model "gpt-5.5" is not available for Codex CLI/,
+  );
+});
+
+test('provider command resolution avoids reusing a command across CLI providers', () => {
+  const cfg = config({
+    llm: { provider: 'claude-cli', model: 'claude-test', permission_mode: 'default', command: 'claude-custom' },
+  });
+
+  assert.equal(resolveProviderCommand(cfg, 'claude-cli'), 'claude-custom');
+  assert.equal(resolveProviderCommand(cfg, 'codex-cli'), 'codex');
+});
+
+test('model catalog exposes broader provider options beyond configured role defaults', () => {
+  const catalog = getLLMModelCatalog(config());
+
+  assert.ok(catalog['claude-cli'].some(model => model.id === 'default'));
+  assert.ok(catalog['claude-cli'].some(model => model.id === 'claude-opus-4-7'));
+  assert.ok(catalog['claude-cli'].some(model => model.id === 'opus[1m]'));
+  assert.equal(catalog['claude-cli'].some(model => model.id === 'claude-opus-4-7-1m'), false);
+  assert.ok(catalog['anthropic-api'].some(model => model.id === 'claude-opus-4-7'));
+  assert.ok(catalog['anthropic-api'].some(model => model.id === 'claude-sonnet-4-6'));
+  assert.ok(catalog['anthropic-api'].some(model => model.id === 'claude-opus-4-1-20250805'));
+  assert.ok(catalog['codex-cli'].some(model => model.id === 'gpt-5.2-codex'));
+  assert.equal(catalog['codex-cli'].some(model => model.id === 'gpt-5.3-codex'), false);
+  assert.equal(catalog['openai-api'].some(model => model.id === 'gpt-5.5'), false);
+  assert.ok(catalog['openai-api'].some(model => model.id === 'gpt-4.1-mini'));
+  assert.equal(providerDefaultModel('openai-api'), 'gpt-5.2');
+});
+
 test('provider error sanitizer redacts common API key shapes', () => {
-  const sanitized = sanitizeProviderError('api_key=sk-proj-1234567890abcdef token=xoxb-1234567890-secret');
+  const sanitized = sanitizeProviderError('api_key=sk-proj-1234567890abcdef token=xoxb-1234567890-secret app=xapp-1234567890-secret');
   assert.doesNotMatch(sanitized, /1234567890/);
   assert.match(sanitized, /\[redacted\]/);
 });

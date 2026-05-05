@@ -1,16 +1,23 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ChatMessage, ForgeConfig, LLMRequest } from '../../types.ts';
 import type { CliRunOptions, CliRunResult, ProviderCliRunner } from './types.ts';
 
 const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
 const DEFAULT_WINDOWS_PATHEXT = ['.com', '.exe', '.bat', '.cmd'];
 const WINDOWS_BATCH_EXTENSIONS = new Set(['.bat', '.cmd']);
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 type LLMProviderId = ForgeConfig['llm']['provider'];
 type ModelSource = 'configured llm.model' | 'request model' | 'fallback model';
 
-export type ProviderAuthRequirement = 'anthropic-api-key' | 'openai-api-key' | 'claude-oauth-or-anthropic-key' | 'none';
+export type ProviderAuthRequirement =
+  | 'anthropic-api-key'
+  | 'openai-api-key'
+  | 'claude-oauth-or-anthropic-key'
+  | 'codex-login-or-openai-api-key'
+  | 'none';
 
 export interface LLMProviderRequirement {
   provider: LLMProviderId;
@@ -20,6 +27,12 @@ export interface LLMProviderRequirement {
   configuredModel: string | null;
   effectiveModel: string;
   modelCompatible: boolean;
+}
+
+export interface LLMModelOption {
+  id: string;
+  label: string;
+  family: 'configured' | 'claude' | 'openai' | 'codex' | 'legacy';
 }
 
 export interface ResolvedCliSpawn {
@@ -39,12 +52,12 @@ const PROVIDERS: Record<LLMProviderId, Omit<LLMProviderRequirement, 'provider' |
   'claude-cli': {
     label: 'Claude CLI',
     auth: 'claude-oauth-or-anthropic-key',
-    defaultModel: 'claude-sonnet-4-6',
+    defaultModel: 'default',
   },
   'codex-cli': {
     label: 'Codex CLI',
-    auth: 'openai-api-key',
-    defaultModel: 'gpt-5.2',
+    auth: 'codex-login-or-openai-api-key',
+    defaultModel: 'gpt-5.2-codex',
   },
   'openai-api': {
     label: 'OpenAI API',
@@ -56,6 +69,60 @@ const PROVIDERS: Record<LLMProviderId, Omit<LLMProviderRequirement, 'provider' |
     auth: 'anthropic-api-key',
     defaultModel: 'claude-sonnet-4-6',
   },
+};
+
+const CLAUDE_CLI_MODELS: LLMModelOption[] = [
+  { id: 'default', label: 'Default', family: 'claude' },
+  { id: 'best', label: 'Best', family: 'claude' },
+  { id: 'opus', label: 'Opus', family: 'claude' },
+  { id: 'opus[1m]', label: 'Opus 1M', family: 'claude' },
+  { id: 'sonnet', label: 'Sonnet', family: 'claude' },
+  { id: 'sonnet[1m]', label: 'Sonnet 1M', family: 'claude' },
+  { id: 'haiku', label: 'Haiku', family: 'claude' },
+  { id: 'opusplan', label: 'Opus Plan', family: 'claude' },
+  { id: 'claude-opus-4-7', label: 'Opus 4.7', family: 'claude' },
+  { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6', family: 'claude' },
+  { id: 'claude-haiku-4-5', label: 'Haiku 4.5', family: 'claude' },
+];
+
+const ANTHROPIC_API_MODELS: LLMModelOption[] = [
+  { id: 'claude-opus-4-7', label: 'Claude Opus 4.7', family: 'claude' },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', family: 'claude' },
+  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', family: 'claude' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 Snapshot', family: 'claude' },
+  { id: 'claude-opus-4-1-20250805', label: 'Claude Opus 4.1', family: 'claude' },
+  { id: 'claude-opus-4-20250514', label: 'Claude Opus 4', family: 'claude' },
+  { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', family: 'claude' },
+  { id: 'claude-3-7-sonnet-20250219', label: 'Claude Sonnet 3.7', family: 'legacy' },
+  { id: 'claude-3-5-sonnet-20241022', label: 'Claude Sonnet 3.5', family: 'legacy' },
+  { id: 'claude-3-5-haiku-20241022', label: 'Claude Haiku 3.5', family: 'legacy' },
+];
+
+const OPENAI_MODELS: LLMModelOption[] = [
+  { id: 'gpt-5.2', label: 'GPT-5.2', family: 'openai' },
+  { id: 'gpt-5.2-pro', label: 'GPT-5.2 Pro', family: 'openai' },
+  { id: 'gpt-5.2-chat-latest', label: 'GPT-5.2 Chat Latest', family: 'openai' },
+  { id: 'gpt-5.2-codex', label: 'GPT-5.2 Codex', family: 'codex' },
+  { id: 'gpt-5-mini', label: 'GPT-5 Mini', family: 'openai' },
+  { id: 'gpt-5-nano', label: 'GPT-5 Nano', family: 'openai' },
+  { id: 'gpt-4.1', label: 'GPT-4.1', family: 'openai' },
+  { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', family: 'openai' },
+  { id: 'gpt-4o', label: 'GPT-4o', family: 'legacy' },
+  { id: 'gpt-4o-mini', label: 'GPT-4o Mini', family: 'legacy' },
+];
+
+const CODEX_CLI_MODELS: LLMModelOption[] = [
+  { id: 'gpt-5.2-codex', label: 'GPT-5.2 Codex', family: 'codex' },
+  { id: 'gpt-5.2', label: 'GPT-5.2', family: 'openai' },
+  { id: 'gpt-5.2-chat-latest', label: 'GPT-5.2 Chat Latest', family: 'openai' },
+  { id: 'gpt-5-mini', label: 'GPT-5 Mini', family: 'openai' },
+  { id: 'gpt-5-nano', label: 'GPT-5 Nano', family: 'openai' },
+  { id: 'gpt-4.1', label: 'GPT-4.1', family: 'openai' },
+];
+
+const DEFAULT_COMMANDS: Record<Extract<LLMProviderId, 'claude-cli' | 'codex-cli'>, string> = {
+  'claude-cli': 'claude',
+  'codex-cli': 'codex',
 };
 
 export function serializeTranscript(messages: ChatMessage[]): string {
@@ -86,7 +153,7 @@ export function resolveProviderModel(config: ForgeConfig, request: LLMRequest, p
       ? 'configured llm.model'
       : 'fallback model';
   const model = request.model ?? config.llm.model ?? providerDefaultModel(provider);
-  validateProviderModel(provider, model, source);
+  validateCatalogProviderModel(config, provider, model, source);
   return model;
 }
 
@@ -94,42 +161,131 @@ export function providerDefaultModel(provider: LLMProviderId): string {
   return PROVIDERS[provider].defaultModel;
 }
 
+export function providerDefaultCommand(provider: Extract<LLMProviderId, 'claude-cli' | 'codex-cli'>): string {
+  return DEFAULT_COMMANDS[provider];
+}
+
+export function resolveProviderCommand(config: ForgeConfig, provider: Extract<LLMProviderId, 'claude-cli' | 'codex-cli'>): string {
+  return config.llm.provider === provider
+    ? config.llm.command ?? providerDefaultCommand(provider)
+    : providerDefaultCommand(provider);
+}
+
+export function getLLMModelCatalog(config: ForgeConfig): Record<LLMProviderId, LLMModelOption[]> {
+  const configuredActiveModel = (provider: LLMProviderId): LLMModelOption[] => (
+    config.llm.model && isConfiguredModelAllowedForProvider(provider, config.llm.model)
+      ? [{ id: config.llm.model, label: 'Configured active model', family: 'configured' as const }]
+      : []
+  );
+  const roleModels: LLMModelOption[] = [
+    { id: config.llm.model, label: 'Configured active model', family: 'configured' as const },
+    { id: config.models.default, label: 'Role: default', family: 'configured' as const },
+    { id: config.models.architect, label: 'Role: architect', family: 'configured' as const },
+    { id: config.models.sentinel, label: 'Role: sentinel', family: 'configured' as const },
+  ].flatMap(item => item.id ? [{ ...item, id: item.id }] : []);
+
+  return {
+    'claude-cli': uniqueModels([
+      ...(config.llm.provider === 'claude-cli' ? configuredActiveModel('claude-cli') : []),
+      ...roleModels.filter(item => isKnownProviderModel('claude-cli', item.id)),
+      ...CLAUDE_CLI_MODELS,
+    ]),
+    'anthropic-api': uniqueModels([
+      ...(config.llm.provider === 'anthropic-api' ? configuredActiveModel('anthropic-api') : []),
+      ...roleModels.filter(item => isKnownProviderModel('anthropic-api', item.id)),
+      ...ANTHROPIC_API_MODELS,
+    ]),
+    'codex-cli': uniqueModels([
+      ...(config.llm.provider === 'codex-cli' ? configuredActiveModel('codex-cli') : []),
+      ...roleModels.filter(item => isKnownProviderModel('codex-cli', item.id)),
+      ...CODEX_CLI_MODELS,
+    ]),
+    'openai-api': uniqueModels([
+      ...(config.llm.provider === 'openai-api' ? configuredActiveModel('openai-api') : []),
+      ...roleModels.filter(item => isKnownProviderModel('openai-api', item.id)),
+      ...OPENAI_MODELS,
+    ]),
+  };
+}
+
+export function isCatalogProviderModel(config: ForgeConfig, provider: LLMProviderId, model: string): boolean {
+  const normalized = model.trim();
+  if (!normalized) return false;
+  return getLLMModelCatalog(config)[provider].some(option => option.id === normalized);
+}
+
 export function validateConfiguredLLMModel(config: ForgeConfig): void {
   if (config.llm.model) {
-    validateProviderModel(config.llm.provider, config.llm.model, 'configured llm.model');
+    validateCatalogProviderModel(config, config.llm.provider, config.llm.model, 'configured llm.model');
   }
 }
 
 export function validateProviderModel(provider: LLMProviderId, model: string, source: ModelSource = 'request model'): void {
-  const normalized = model.trim().toLowerCase();
+  const normalized = model.trim();
   if (!normalized) {
     throw new Error(`${source} must not be empty`);
   }
 
-  const expectsClaude = provider === 'claude-cli' || provider === 'anthropic-api';
-  const looksClaude = normalized.startsWith('claude-');
-  const looksOpenAI = normalized.startsWith('gpt-')
-    || normalized.startsWith('o1')
-    || normalized.startsWith('o3')
-    || normalized.startsWith('o4')
-    || normalized.startsWith('o5')
-    || normalized.startsWith('chatgpt-')
-    || normalized.startsWith('codex-')
-    || normalized.startsWith('computer-use-');
-
-  if (expectsClaude && looksOpenAI) {
-    throw incompatibleModelError(provider, model, source, 'Claude/Anthropic');
-  }
-  if (!expectsClaude && looksClaude) {
-    throw incompatibleModelError(provider, model, source, 'OpenAI/Codex');
+  if (!isKnownProviderModel(provider, normalized)) {
+    throw unavailableModelError(provider, model, source);
   }
 }
 
-function incompatibleModelError(provider: LLMProviderId, model: string, source: ModelSource, expected: string): Error {
+function validateCatalogProviderModel(config: ForgeConfig, provider: LLMProviderId, model: string, source: ModelSource): void {
+  const normalized = model.trim();
+  if (!normalized) {
+    throw new Error(`${source} must not be empty`);
+  }
+  if (!isCatalogProviderModel(config, provider, normalized)) {
+    throw unavailableModelError(provider, model, source);
+  }
+}
+
+function isKnownProviderModel(provider: LLMProviderId, model: string): boolean {
+  const normalized = model.trim();
+  if (!normalized) return false;
+  return baseProviderModels(provider).some(option => option.id === normalized);
+}
+
+function isConfiguredModelAllowedForProvider(provider: LLMProviderId, model: string): boolean {
+  if (isKnownProviderModel(provider, model)) return true;
+  return !(Object.keys(PROVIDERS) as LLMProviderId[])
+    .some(otherProvider => otherProvider !== provider && isKnownProviderModel(otherProvider, model));
+}
+
+function baseProviderModels(provider: LLMProviderId): LLMModelOption[] {
+  switch (provider) {
+    case 'claude-cli':
+      return CLAUDE_CLI_MODELS;
+    case 'anthropic-api':
+      return ANTHROPIC_API_MODELS;
+    case 'codex-cli':
+      return CODEX_CLI_MODELS;
+    case 'openai-api':
+      return OPENAI_MODELS;
+    default:
+      return assertNeverProvider(provider);
+  }
+}
+
+function uniqueModels(models: LLMModelOption[]): LLMModelOption[] {
+  const seen = new Set<string>();
+  return models.filter((model) => {
+    if (seen.has(model.id)) return false;
+    seen.add(model.id);
+    return true;
+  });
+}
+
+function unavailableModelError(provider: LLMProviderId, model: string, source: ModelSource): Error {
   return new Error(
-    `${source} "${model}" is not compatible with ${PROVIDERS[provider].label}; expected a ${expected} model. `
-    + 'Set llm.model for this provider or remove it to use the provider default.',
+    `${source} "${model}" is not available for ${PROVIDERS[provider].label}. `
+    + 'Select a catalog model for this provider or set llm.model explicitly for the selected provider.',
   );
+}
+
+function assertNeverProvider(provider: never): never {
+  throw new Error(`Unsupported LLM provider: ${provider}`);
 }
 
 export function getLLMProviderRequirements(config: ForgeConfig): {
@@ -141,7 +297,7 @@ export function getLLMProviderRequirements(config: ForgeConfig): {
     const effectiveModel = configuredModel ?? providerDefaultModel(provider);
     let modelCompatible = true;
     try {
-      validateProviderModel(provider, effectiveModel, configuredModel ? 'configured llm.model' : 'fallback model');
+      validateCatalogProviderModel(config, provider, effectiveModel, configuredModel ? 'configured llm.model' : 'fallback model');
     } catch {
       modelCompatible = false;
     }
@@ -193,7 +349,7 @@ export function buildCliEnv(
     const val = readEnv(process.env, key);
     if (val !== undefined) env[key] = val;
   }
-  env.PATH = [path.join(options.binRoot ?? process.cwd(), 'node_modules', '.bin'), env.PATH].filter(Boolean).join(path.delimiter);
+  env.PATH = [path.join(options.binRoot ?? PACKAGE_ROOT, 'node_modules', '.bin'), env.PATH].filter(Boolean).join(path.delimiter);
   for (const [key, val] of Object.entries(extra)) {
     if (val !== undefined && val !== null) env[key] = val;
   }
@@ -370,6 +526,7 @@ export function sanitizeProviderError(error: unknown, fallback = 'Provider reque
     .replace(/\bsk-ant-[A-Za-z0-9_-]{8,}\b/g, 'sk-ant-[redacted]')
     .replace(/\bsk-proj-[A-Za-z0-9_-]{8,}\b/g, 'sk-proj-[redacted]')
     .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, 'sk-[redacted]')
+    .replace(/\bxapp-[A-Za-z0-9-]{8,}\b/g, 'xapp-[redacted]')
     .replace(/\bxox[baprs]-[A-Za-z0-9-]{8,}\b/g, 'xox[redacted]')
     .replace(/\b(bearer|authorization|api[_-]?key|token|password|secret)(["'\s:=]+)(["']?)[^"',}\s]+/gi, '$1$2$3[redacted]')
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]+/g, ' ')

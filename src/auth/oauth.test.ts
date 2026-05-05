@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   checkAnthropicAuth,
+  checkCodexAuth,
   checkOpenAIAuth,
   checkSlackAuth,
   getAuthState,
@@ -65,15 +66,42 @@ test('auth checks resolve configured env key refs', () => {
     assert.equal(auth.anthropic, 'authenticated');
     assert.equal(auth.slack, 'authenticated');
     assert.equal(auth.openai, 'authenticated');
+    assert.equal(auth.codex, 'authenticated');
     assert.equal(auth.selectedProvider, 'claude-cli');
     assert.deepEqual(auth.providers.map(p => [p.provider, p.requirement, p.status]), [
       ['claude-cli', 'claude-oauth-or-anthropic-key', 'authenticated'],
-      ['codex-cli', 'openai-api-key', 'authenticated'],
+      ['codex-cli', 'codex-login-or-openai-api-key', 'authenticated'],
       ['openai-api', 'openai-api-key', 'authenticated'],
       ['anthropic-api', 'anthropic-api-key', 'authenticated'],
     ]);
   } finally {
     restoreEnv(prior);
+  }
+});
+
+test('codex auth can use Codex CLI login without an OpenAI API key', () => {
+  const cfg = config();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-codex-auth-'));
+  const bin = path.join(dir, 'codex');
+  const prior = {
+    PATH: process.env.PATH,
+    FORGE_OPENAI_KEY: process.env.FORGE_OPENAI_KEY,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+  };
+
+  try {
+    fs.writeFileSync(bin, '#!/bin/sh\n[ "$1" = "login" ] && [ "$2" = "status" ] && exit 0\nexit 1\n', { mode: 0o700 });
+    process.env.PATH = `${dir}${path.delimiter}${process.env.PATH ?? ''}`;
+    delete process.env.FORGE_OPENAI_KEY;
+    delete process.env.OPENAI_API_KEY;
+
+    assert.equal(checkOpenAIAuth(cfg), 'not_authenticated');
+    assert.equal(checkCodexAuth(cfg), 'authenticated');
+    const provider = getAuthState(cfg).providers.find(p => p.provider === 'codex-cli');
+    assert.equal(provider?.status, 'authenticated');
+  } finally {
+    restoreEnv(prior);
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

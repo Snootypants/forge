@@ -4,16 +4,52 @@ import { initSettings } from './settings.js';
 const API = '';
 let authToken = '';
 
+export class ApiError extends Error {
+  constructor(message, { status = 0, statusText = '', data = null, path = '' } = {}) {
+    super(message || statusText || 'Request failed');
+    this.name = 'ApiError';
+    this.status = status;
+    this.statusText = statusText;
+    this.data = data;
+    this.path = path;
+    this.isAuth = status === 401 || status === 403;
+    this.isNetwork = status === 0;
+  }
+}
+
 export async function api(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
-  const res = await fetch(`${API}${path}`, { credentials: 'same-origin', ...opts, headers });
-  const data = await readResponse(res);
-  if (res.status === 401) {
-    showLogin();
-    throw new Error(errorMessage(data) || 'Unauthorized');
+  let res;
+  try {
+    res = await fetch(`${API}${path}`, { credentials: 'same-origin', ...opts, headers });
+  } catch (err) {
+    const apiErr = new ApiError(err.message || 'Network request failed', { status: 0, path });
+    window.dispatchEvent(new CustomEvent('forge:api-error', { detail: apiErr }));
+    throw apiErr;
   }
-  if (!res.ok) throw new Error(errorMessage(data) || `${res.status} ${res.statusText}`.trim());
+  const data = await readResponse(res);
+  if (res.status === 401 || res.status === 403) {
+    const apiErr = new ApiError(errorMessage(data) || (res.status === 403 ? 'Forbidden' : 'Unauthorized'), {
+      status: res.status,
+      statusText: res.statusText,
+      data,
+      path,
+    });
+    showLogin();
+    window.dispatchEvent(new CustomEvent('forge:auth-failure', { detail: apiErr }));
+    throw apiErr;
+  }
+  if (!res.ok) {
+    const apiErr = new ApiError(errorMessage(data) || `${res.status} ${res.statusText}`.trim(), {
+      status: res.status,
+      statusText: res.statusText,
+      data,
+      path,
+    });
+    window.dispatchEvent(new CustomEvent('forge:api-error', { detail: apiErr }));
+    throw apiErr;
+  }
   return data;
 }
 
@@ -39,21 +75,47 @@ function errorMessage(data) {
   return data.error || data.message || data.detail || '';
 }
 
-function updateStatus(connected) {
+function updateStatus(state) {
   const pill = document.getElementById('status-pill');
-  pill.innerHTML = connected
-    ? '<span class="dot ok"></span><span class="label">connected</span>'
-    : '<span class="dot err"></span><span class="label">disconnected</span>';
+  const normalized = state === true ? 'connected' : state === false ? 'disconnected' : state;
+  const dot = normalized === 'connected' ? 'ok' : normalized === 'degraded' ? 'warn' : 'err';
+  const label = normalized || 'disconnected';
+  pill.innerHTML = `<span class="dot ${dot}"></span><span class="label">${label}</span>`;
 }
 
+window.addEventListener('forge:connection-state', (event) => {
+  updateStatus(event.detail?.state || 'disconnected');
+});
+
 function showLogin() {
+  hideStartupError();
   document.getElementById('login-gate').style.display = 'flex';
   document.getElementById('app').style.display = 'none';
 }
 
 function showApp() {
   document.getElementById('login-gate').style.display = 'none';
+  hideStartupError();
   document.getElementById('app').style.display = 'flex';
+}
+
+function showStartupError(err) {
+  const gate = document.getElementById('startup-error');
+  const detail = document.getElementById('startup-error-detail');
+  if (!gate || !detail) return;
+  document.getElementById('login-gate').style.display = 'none';
+  document.getElementById('app').style.display = 'none';
+  detail.textContent = err?.message || 'The web API is not responding.';
+  gate.hidden = false;
+  gate.style.display = 'flex';
+  updateStatus(false);
+}
+
+function hideStartupError() {
+  const gate = document.getElementById('startup-error');
+  if (!gate) return;
+  gate.hidden = true;
+  gate.style.display = 'none';
 }
 
 document.getElementById('login-btn').addEventListener('click', doLogin);
@@ -87,6 +149,8 @@ async function doLogin() {
     errEl.style.display = 'block';
   }
 }
+
+document.getElementById('startup-retry')?.addEventListener('click', init);
 
 async function loadPublicInfo() {
   try {
@@ -157,8 +221,9 @@ async function init() {
   try {
     await initChat(api, toast);
     updateStatus(true);
-  } catch {
-    showLogin();
+  } catch (err) {
+    if (err?.isAuth) showLogin();
+    else showStartupError(err);
   }
 }
 

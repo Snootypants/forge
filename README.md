@@ -27,7 +27,7 @@ Forge is not trying to be one more all-in-one hosted agent product. It is the ba
 
 That distinction matters. Claude, Codex, OpenAI, Anthropic, and later local models are providers behind the same interface. Forge should not be conceptually tied to any single model vendor or CLI.
 
-The current runtime is usable, but still hardening-stage software. It is good enough for personal infrastructure and active development; the remaining work is around migrations, runtime settings truth, Slack trust policy, Docker defaults, and deeper chat/context parity.
+The current runtime is usable, but still hardening-stage software. It is good enough for personal infrastructure and active development; the remaining work is around migrations, runtime settings truth, native Windows hardening, and deeper chat/context parity.
 
 ## Example Deployment
 
@@ -179,7 +179,7 @@ Single process. SQLite for state. External services are optional except for whic
 
 ## Installation
 
-Use Docker for the most portable install. Native installs are supported on macOS and Linux; Windows users should use Docker Desktop or WSL until native Windows has finished CI validation.
+Use Docker for the most portable install. Docker build and readiness smoke are covered by CI, with state mounted under `/config` so persistence survives rebuilds. Native macOS is verified through active development. Linux native support is CI-tracked and expected to work with Node 22; native Windows is being hardened, with Docker Desktop or WSL recommended today.
 
 For the full install guide, including provider credential caveats, see [docs/install.md](docs/install.md).
 
@@ -187,8 +187,8 @@ For the full install guide, including provider credential caveats, see [docs/ins
 
 | Path | Status | Use when |
 |------|--------|----------|
-| Docker | Recommended universal path | You want the same runtime shape on macOS, Linux, Windows, NAS hardware, or servers. |
-| npm | Prepared package metadata | Package metadata is prepared for `@snootypants/forge` with the `forge` CLI command. Install with `npm install -g @snootypants/forge` after the package is published. The unscoped `forge` npm name is currently occupied. |
+| Docker | Verified recommended path | You want the same runtime shape on macOS, Linux, Windows, NAS hardware, or servers, with config/state mounted outside the image. |
+| npm | Prepared package metadata | Package metadata is prepared for `@35bird/forge` with the `forge` CLI command. Install with `npm install -g @35bird/forge` after the package is published. The unscoped `forge` npm name is currently occupied. |
 | git clone | Current source install | You are developing Forge or running from a checked-out repo before npm packaging is published. |
 
 ### Source Install
@@ -216,11 +216,21 @@ npm start
 
 On first boot:
 1. Creates SQLite databases in `./dbs/`
-2. Generates a web auth token and saves it under `./logs/` if one is not configured
+2. Generates and saves a web auth token under `./logs/` if one is not configured
 3. Starts the web UI on `http://127.0.0.1:6800` by default
 4. Skips Slack if no tokens are configured (normal)
 
-Open the web UI and configure auth via the Settings tab.
+Open the web UI and paste the saved token when prompted. Show it explicitly with:
+
+```bash
+forge token --show
+```
+
+From a source checkout before global npm install, use:
+
+```bash
+node --experimental-strip-types src/index.ts token --show
+```
 
 ### Docker
 
@@ -232,14 +242,14 @@ docker run -d \
   --name ember \
   -p 6800:6800 \
   --mount type=bind,src="$(pwd)/forge.config.yaml",dst=/config/forge.config.yaml,readonly \
-  --mount type=volume,src=forge-dbs,dst=/app/dbs \
-  --mount type=volume,src=forge-identity,dst=/app/identity \
-  --mount type=volume,src=forge-logs,dst=/app/logs \
+  --mount type=volume,src=forge-dbs,dst=/config/dbs \
+  --mount type=volume,src=forge-identity,dst=/config/identity \
+  --mount type=volume,src=forge-logs,dst=/config/logs \
   --env-file .env \
   forge
 ```
 
-Docker runs the compiled release artifact, expects config at `/config/forge.config.yaml`, and binds the web UI to `0.0.0.0` inside the container so `-p 6800:6800` works. Use named volumes for `dbs/`, `identity/`, and `logs/` so state and the generated web auth token survive rebuilds.
+Docker runs the compiled release artifact, expects config at `/config/forge.config.yaml`, and binds the web UI to `0.0.0.0` inside the container so `-p 6800:6800` works. Because relative paths resolve under `forge.root`, Docker configs should use `forge.root: /config` or absolute `/config/...` paths. Use named volumes for `/config/dbs`, `/config/identity`, and `/config/logs` so state and the generated web auth token survive rebuilds.
 
 API providers are the easiest Docker path: pass `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` through `.env` and keep config entries as `env:` references. CLI providers need their CLI binary and credentials inside the container, or carefully mounted host credential directories; do not assume host `~/.claude` or Codex login state is available in Docker.
 
@@ -251,14 +261,14 @@ Forge is provider-backed. The default provider is `claude-cli`, but `codex-cli`,
 
 For Claude CLI, Forge prefers Claude Code's OAuth. You can also point `api.anthropic` at an environment variable when you intentionally want API-key auth.
 
-From the Settings UI, click **"Authenticate Claude"** — this spawns `claude auth login` which opens a browser for the OAuth flow. Once authenticated, the credential lives in `~/.claude/` and the Claude CLI handles refresh.
+From the Settings UI, click **"Authenticate Claude"** — this spawns `claude auth login` which opens a browser for the OAuth flow. Once authenticated, the credential lives in `~/.claude/` and the Claude CLI handles refresh. The Settings UI also shows copy buttons for the terminal auth commands.
 
 Or from terminal:
 ```bash
 claude auth login
 ```
 
-For Codex CLI, authenticate the installed Codex CLI separately:
+For Codex CLI, authenticate the installed Codex CLI separately on the same host or inside the same container environment that runs Forge:
 
 ```bash
 codex login
@@ -266,11 +276,16 @@ codex login
 
 For API providers, set the matching key ref in `.env` or `forge.config.yaml`.
 
-The selected provider is configured under `llm:`. CLI providers can run in `permission_mode: default` or `permission_mode: yolo`. `yolo` intentionally maps to the provider's full-power/no-sandbox mode where supported.
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENAI_API_KEY="sk-..."
+```
+
+The selected provider is configured under `llm:`. CLI providers can run in `permission_mode: default` or `permission_mode: yolo`. `yolo` intentionally maps to the provider's full-power/no-sandbox mode where supported. Provider CLIs own their own login files and sandbox behavior; Forge does not make Claude, Codex, API, and future providers identical.
 
 #### OpenAI (optional — enables vector search)
 
-Adds semantic/vector search via `text-embedding-3-small`. Without it, the system runs FTS5-only at 99% accuracy.
+Adds semantic/vector search via `text-embedding-3-small` when an OpenAI key is configured and `sqlite-vec` loads successfully. Without it, the system runs FTS5-only.
 
 From Settings UI: paste your OpenAI API key. It's written to `.env` with `chmod 600`.
 
@@ -306,8 +321,8 @@ Restart forge after adding Slack tokens.
 ```yaml
 forge:
   name: my-agent        # agent name (shows in logs + Slack)
-  version: "1.0.0"
-  root: .
+  version: "0.1.0"
+  root: .               # use /config in Docker when mounting config at /config
 
 user:
   name: your-name       # who this agent serves
@@ -353,7 +368,7 @@ services:
     port: 6800
     host: 127.0.0.1
     context_window_tokens: 80000
-    debug_prompt_context: false
+    debug_prompt_context: true
     # Optional. If omitted, forge uses FORGE_AUTH_TOKEN or a generated token
     # persisted in the resolved logs directory.
     # auth_token: "change-me"
@@ -372,7 +387,9 @@ budget:
 
 API keys can use `env:` references — they're read from environment variables or `.env` at runtime. Nothing sensitive lives in this file unless you intentionally set inline `value:` entries or `services.web.auth_token`.
 
-Web auth token precedence is: `FORGE_AUTH_TOKEN`, then `services.web.auth_token`, then the persisted token file in the resolved logs directory. If none exists, forge generates a 32-byte token and writes it with `0600` permissions. Startup logs show the saved path, not the token value.
+Web auth token precedence is: `FORGE_AUTH_TOKEN`, then `services.web.auth_token`, then the persisted token file in the resolved logs directory. If none exists, forge generates a 32-byte token and writes it with `0600` permissions. Run `forge token --show` when you need to reveal the saved token.
+
+The Settings UI can disable web token enforcement by writing `webAuthRequired: false` to the stored settings file under the resolved logs directory. Only do this behind a trusted local network, VPN, or reverse proxy; disabling auth exposes the web API to anyone who can reach the listening host and port.
 
 ## Identity
 
@@ -458,7 +475,7 @@ sudo systemctl start forge@ember
 
 ### Docker Operations
 
-The image builds `dist/` in a build stage and runs `node dist/index.js` with production dependencies only. It does not copy `forge.config.yaml`; mount runtime config at `/config/forge.config.yaml`. `.dockerignore` excludes local databases, identity files, logs, `.env*`, `forge.config.yaml`, Claude credentials, editor files, and eval datasets so local state and secrets are not sent to the Docker build context.
+The image builds `dist/` in a build stage and runs `node dist/index.js` with production dependencies only. It does not copy `forge.config.yaml`; mount runtime config at `/config/forge.config.yaml`. Relative config paths resolve under `forge.root`, so use `forge.root: /config` for Docker configs and mount persistent state at `/config/dbs`, `/config/identity`, and `/config/logs`. `.dockerignore` excludes local databases, identity files, logs, `.env*`, `forge.config.yaml`, Claude credentials, editor files, and eval datasets so local state and secrets are not sent to the Docker build context.
 
 If you intentionally bind-mount host directories instead of named volumes, create them first and make them writable by the container user, which is UID/GID `1000:1000` in the base Node image:
 
@@ -658,15 +675,15 @@ Host tools such as shell commands, file operations, network checks, and third-pa
 
 ### As a Memory Backend
 
-Use the memory service standalone in any Node.js application:
+From a source checkout, you can use the memory service standalone in another Node.js application. These internal source paths are not public npm subpath exports and are intended for source-checkout integrations:
 
 ```typescript
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
-import { MemoryService } from 'forge/src/services/memory.ts';
+import { MemoryService } from './path/to/forge/src/services/memory.ts';
 
 const db = new Database('./my-app.db');
-db.exec(fs.readFileSync('path/to/forge/src/db/schemas/memory.sql', 'utf-8'));
+db.exec(fs.readFileSync('./path/to/forge/src/db/schemas/memory.sql', 'utf-8'));
 const memory = new MemoryService(db);
 
 // Your app's memory layer — 99% retrieval accuracy out of the box
@@ -713,10 +730,10 @@ Coordinator (:6800) → Homebase (:6801) for network tasks
 
 | Platform | Notes |
 |----------|-------|
-| Docker | Recommended universal path on any host that can run Docker. Mount config, secrets, databases, identity, and logs outside the image. |
-| macOS | Supported native source install for development and personal runtime use. |
-| Linux | Supported native source install; Ubuntu/Debian with systemd is the primary bare-metal server path. |
-| Windows | Docker Desktop or WSL is recommended. Native Windows is CI-tracked/experimental until install, build, provider spawning, and runtime behavior are validated. |
+| Docker | Verified recommended path on any host that can run Docker. CI builds the image and smokes `/readyz`. Mount config, secrets, databases, identity, and logs outside the image under `/config`. |
+| macOS | Verified native development path. |
+| Linux | Supported native target and covered by CI; Ubuntu/Debian with systemd is the primary bare-metal server path. |
+| Windows | In progress. Docker Desktop or WSL is recommended today. Native Windows is being hardened through CI and external install feedback. |
 | ZimaOS / NAS / Raspberry Pi | Use Docker where possible; native Linux can work when Node 22 and native dependencies are available for the device. |
 
 ### Hardware Requirements

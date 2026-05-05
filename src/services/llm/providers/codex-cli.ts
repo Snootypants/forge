@@ -1,6 +1,6 @@
 import { resolveKey } from '../../../config.ts';
 import type { ForgeConfig, LLMRequest, LLMResponse } from '../../../types.ts';
-import { buildCliEnv, ensureUserMessage, extractText, isRecord, makeCommandRunner, resolveProviderModel, sanitizeProviderError, serializePromptWithSystem } from '../shared.ts';
+import { buildCliEnv, ensureUserMessage, extractText, isRecord, makeCommandRunner, resolveProviderCommand, resolveProviderModel, sanitizeProviderError, serializePromptWithSystem } from '../shared.ts';
 import type { LLMProvider, ProviderCliRunner } from '../types.ts';
 
 export class CodexCliProvider implements LLMProvider {
@@ -10,7 +10,7 @@ export class CodexCliProvider implements LLMProvider {
 
   constructor(config: ForgeConfig, runCodexCli?: ProviderCliRunner) {
     this.config = config;
-    this.runCodexCli = runCodexCli ?? makeCommandRunner(config.llm.command ?? 'codex');
+    this.runCodexCli = runCodexCli ?? makeCommandRunner(resolveProviderCommand(config, this.name));
   }
 
   async complete(request: LLMRequest): Promise<LLMResponse> {
@@ -32,7 +32,7 @@ export class CodexCliProvider implements LLMProvider {
       args.splice(args.length - 1, 0, '--cd', this.config.llm.workdir);
     }
 
-    if (this.config.llm.permission_mode === 'yolo') {
+    if ((request.permissionMode ?? this.config.llm.permission_mode) === 'yolo') {
       args.splice(args.length - 1, 0, '--dangerously-bypass-approvals-and-sandbox');
     }
 

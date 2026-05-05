@@ -6,6 +6,7 @@ import { MemoryService } from './services/memory.ts';
 import { LLMService } from './services/llm.ts';
 import { EmbedService } from './services/embed.ts';
 import type { ForgeConfig, ResolvedPaths, BootMode } from './types.ts';
+import { atomicWriteFileSync } from './utils/atomic-write.ts';
 
 export class Platform {
   private static instance: Platform | null = null;
@@ -136,8 +137,7 @@ export class Platform {
     for (const [filename, content] of Object.entries(templates)) {
       const fp = path.join(identityDir, filename);
       if (!fs.existsSync(fp)) {
-        fs.writeFileSync(fp, content, { encoding: 'utf-8', mode: 0o600 });
-        try { fs.chmodSync(fp, 0o600); } catch { /* best effort */ }
+        atomicWriteFileSync(fp, content, { encoding: 'utf-8', mode: 0o600 });
         created = true;
       }
     }

@@ -16,6 +16,7 @@ const MIN_NODE_VERSION = [22, 6, 0] as const;
 
 type CliCommand = 'init' | 'start' | 'doctor' | 'token' | 'help';
 type Status = 'ok' | 'warn' | 'fail';
+type WebAuthResolution = ReturnType<typeof resolveWebAuthToken>;
 
 interface CliOptions {
   cwd?: string;
@@ -30,6 +31,7 @@ interface ParsedArgs {
   mode: BootMode;
   configPath?: string;
   force: boolean;
+  showToken: boolean;
 }
 
 interface Check {
@@ -56,7 +58,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     case 'doctor':
       return doctor(selectConfigPath(parsed.configPath, cwd), out, options.nodeVersion);
     case 'token':
-      return tokenStatus(selectConfigPath(parsed.configPath, cwd), out);
+      return tokenStatus(selectConfigPath(parsed.configPath, cwd), out, parsed.showToken);
     case 'help':
       printHelp(out);
       return 0;
@@ -65,7 +67,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
 
 export function parseCliArgs(argv: string[]): ParsedArgs {
   if (argv.includes('--help') || argv.includes('-h')) {
-    return { command: 'help', mode: 'full', force: false };
+    return { command: 'help', mode: 'full', force: false, showToken: false };
   }
 
   const first = argv[0];
@@ -75,6 +77,7 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
   let mode: BootMode = 'full';
   let configPath = process.env.FORGE_CONFIG;
   let force = false;
+  let showToken = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -93,6 +96,10 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
       force = true;
       continue;
     }
+    if (arg === '--show') {
+      showToken = true;
+      continue;
+    }
     if (isMode(arg) && command === 'start') {
       mode = arg;
       continue;
@@ -104,8 +111,11 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
   if (command !== 'init' && force) {
     throw new Error('--force is only supported by forge init');
   }
+  if (command !== 'token' && showToken) {
+    throw new Error('--show is only supported by forge token');
+  }
 
-  return { command, mode, configPath, force };
+  return { command, mode, configPath, force, showToken };
 }
 
 export async function startRuntime(args: { mode: BootMode; configPath?: string }): Promise<void> {
@@ -114,13 +124,8 @@ export async function startRuntime(args: { mode: BootMode; configPath?: string }
 
   try {
     const auth = resolveWebAuthToken(platform.config, platform.resolved);
-    if (auth.source === 'generated') {
-      console.log(`\n[auth] Generated web auth token and saved it to ${auth.path}`);
-      console.log('[auth] Token redacted; read the saved token file on the host to log in.\n');
-    } else if (auth.source === 'file') {
-      console.log(`[auth] Loaded web auth token from ${auth.path}`);
-    } else {
-      console.log(`[auth] Loaded web auth token from ${auth.source}`);
+    for (const line of webAuthStartupMessages(auth)) {
+      console.log(line);
     }
 
     if (args.mode === 'full' || args.mode === 'web') {
@@ -177,6 +182,25 @@ export async function startRuntime(args: { mode: BootMode; configPath?: string }
     platform.shutdown();
     throw err;
   }
+}
+
+export function webAuthStartupMessages(auth: WebAuthResolution): string[] {
+  if (auth.source === 'generated') {
+    return [
+      `[auth] Generated web auth token and saved it to ${auth.path}`,
+      '[auth] Run "forge token --show" to reveal the saved token if you need to log in.',
+    ];
+  }
+  if (auth.source === 'file') {
+    return [
+      `[auth] Loaded web auth token from ${auth.path}`,
+      '[auth] Run "forge token --show" to reveal the saved token if you need to log in.',
+    ];
+  }
+  return [
+    `[auth] Loaded web auth token from ${auth.source}`,
+    '[auth] Run "forge token --show" to inspect configured token source if needed.',
+  ];
 }
 
 function initConfig(
@@ -239,7 +263,7 @@ function doctor(
   return checks.some(check => check.status === 'fail') ? 1 : 0;
 }
 
-function tokenStatus(configPath: string | undefined, out: (line: string) => void): number {
+function tokenStatus(configPath: string | undefined, out: (line: string) => void, show = false): number {
   let loaded: { config: ForgeConfig; resolved: ResolvedPaths };
   try {
     loaded = loadConfig(configPath);
@@ -260,8 +284,33 @@ function tokenStatus(configPath: string | undefined, out: (line: string) => void
   if (!envExists && !configExists && !fileExists) {
     out('[token] no token exists yet; forge start will generate one in the file path above.');
   }
+  if (show) {
+    const token = readConfiguredToken(loaded.config, tokenPath);
+    if (token) {
+      out(`[token] value: ${token}`);
+    } else {
+      out('[token] value: unavailable; no token exists yet.');
+    }
+  } else if (envExists || configExists || fileExists) {
+    out('[token] value: hidden; rerun with --show to print it.');
+  }
 
   return 0;
+}
+
+function readConfiguredToken(config: ForgeConfig, tokenPath: string): string | null {
+  const envToken = process.env.FORGE_AUTH_TOKEN?.trim();
+  if (envToken) return envToken;
+
+  const configToken = config.services.web.auth_token?.trim();
+  if (configToken) return configToken;
+
+  try {
+    const fileToken = fs.readFileSync(tokenPath, 'utf-8').trim();
+    return fileToken || null;
+  } catch {
+    return null;
+  }
 }
 
 function checkNodeVersion(nodeVersion: string): Check {
@@ -435,7 +484,7 @@ function defaultConfigTemplate(): string {
   return [
     'forge:',
     '  name: forge',
-    '  version: "1.0.0"',
+    '  version: "0.1.0"',
     '  root: .',
     '',
     'user:',
@@ -499,7 +548,7 @@ function printHelp(out: (line: string) => void): void {
     '  forge init [--force]',
     '  forge start [daemon|web|full] [--config path]',
     '  forge doctor [--config path]',
-    '  forge token [--config path]',
+    '  forge token [--config path] [--show]',
     '',
     'Legacy start form is also accepted:',
     '  forge [daemon|web|full] [--config path]',

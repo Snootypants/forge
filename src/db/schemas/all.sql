@@ -16,12 +16,19 @@ CREATE TABLE IF NOT EXISTS document_chunks (
   content TEXT NOT NULL,
   start_char INTEGER NOT NULL,
   end_char INTEGER NOT NULL,
-  UNIQUE(document_id, chunk_index)
+  UNIQUE(document_id, chunk_index),
+  FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source);
 CREATE INDEX IF NOT EXISTS idx_documents_updated ON documents(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_document_chunks_doc ON document_chunks(document_id);
+
+DROP TRIGGER IF EXISTS document_chunks_document_delete;
+
+CREATE TRIGGER document_chunks_document_delete AFTER DELETE ON documents BEGIN
+  DELETE FROM document_chunks WHERE document_id = old.id;
+END;
 
 CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
   source,

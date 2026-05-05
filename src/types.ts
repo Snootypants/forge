@@ -55,7 +55,9 @@ export const ForgeConfigSchema = z.object({
     web: z.object({
       port: z.number().default(6800),
       host: z.string().default('127.0.0.1'),
+      allowed_hosts: z.array(z.string()).optional(),
       auth_token: z.string().optional(),
+      auth_required: z.boolean().optional(),
       context_window_tokens: z.number().int().positive().default(80000),
       debug_prompt_context: z.boolean().default(false),
     }).default({}),
@@ -78,6 +80,8 @@ export type ForgeConfig = z.infer<typeof ForgeConfigSchema>;
 export type KeyRef = z.infer<typeof KeyRefSchema>;
 
 export interface ResolvedPaths {
+  configDir: string;
+  envPath: string;
   root: string;
   dbs: string;
   identity: string;
@@ -136,7 +140,9 @@ export interface ChatMessage {
 export interface LLMRequest {
   system: string;
   messages: ChatMessage[];
+  provider?: z.infer<typeof LLMProviderSchema>;
   model?: string;
+  permissionMode?: z.infer<typeof LLMPermissionModeSchema>;
 }
 
 export interface LLMResponse {

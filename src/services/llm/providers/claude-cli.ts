@@ -1,6 +1,6 @@
 import { resolveKey } from '../../../config.ts';
 import type { ForgeConfig, LLMRequest, LLMResponse } from '../../../types.ts';
-import { buildCliEnv, ensureUserMessage, extractText, isRecord, makeCommandRunner, resolveProviderModel, sanitizeProviderError, serializeTranscript } from '../shared.ts';
+import { buildCliEnv, ensureUserMessage, extractText, isRecord, makeCommandRunner, resolveProviderCommand, resolveProviderModel, sanitizeProviderError, serializeTranscript } from '../shared.ts';
 import type { LLMProvider, ProviderCliRunner } from '../types.ts';
 
 export class ClaudeCliProvider implements LLMProvider {
@@ -10,7 +10,7 @@ export class ClaudeCliProvider implements LLMProvider {
 
   constructor(config: ForgeConfig, runClaudeCli?: ProviderCliRunner) {
     this.config = config;
-    this.runClaudeCli = runClaudeCli ?? makeCommandRunner(config.llm.command ?? 'claude');
+    this.runClaudeCli = runClaudeCli ?? makeCommandRunner(resolveProviderCommand(config, this.name));
   }
 
   async complete(request: LLMRequest): Promise<LLMResponse> {
@@ -28,7 +28,7 @@ export class ClaudeCliProvider implements LLMProvider {
       request.system,
     ];
 
-    if (this.config.llm.permission_mode === 'yolo') {
+    if ((request.permissionMode ?? this.config.llm.permission_mode) === 'yolo') {
       args.push('--permission-mode', 'bypassPermissions');
     }
 

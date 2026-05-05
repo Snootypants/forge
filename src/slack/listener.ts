@@ -4,7 +4,7 @@ import type { LLMService } from '../services/llm.ts';
 import type { MemoryService } from '../services/memory.ts';
 import type { ForgeConfig } from '../types.ts';
 import { resolveKey } from '../config.ts';
-import { buildChatContext, handleMemoryCommand } from '../services/chat.ts';
+import { buildChatContextAsync, handleMemoryCommand } from '../services/chat.ts';
 
 interface SlackDeps {
   config: ForgeConfig;
@@ -245,7 +245,7 @@ export async function startSlackListener(deps: SlackDeps): Promise<App> {
           });
           saveAssistantReply(replyResult.ts ?? '', command.reply, null, null);
         } else {
-          const context = buildChatContext({
+          const context = await buildChatContextAsync({
             messagesDb: deps.messagesDb,
             memory: deps.memory,
             identity: deps.identity,
@@ -259,6 +259,7 @@ export async function startSlackListener(deps: SlackDeps): Promise<App> {
           const response = await deps.llm.complete({
             system: context.system,
             messages: context.messages,
+            permissionMode: deps.config.llm.permission_mode,
           });
 
           const replyResult = await client.chat.postMessage({

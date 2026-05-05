@@ -22,7 +22,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
 
-RUN mkdir -p dbs identity logs /config && chown -R node:node /app /config
+RUN mkdir -p /config/dbs /config/identity /config/logs && chown -R node:node /app /config
 USER node
 
 EXPOSE 6800

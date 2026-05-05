@@ -10,7 +10,7 @@ Purpose: turn the current QA-hardened repo into something a new user can install
 - Native macOS and Linux are supported install paths.
 - Windows should be supported through Docker Desktop or WSL2 first.
 - Native Windows should become CI-validated before it is called first-class.
-- npm publish should use a scoped package unless the existing `forge` npm owner transfers the unscoped name.
+- npm publish should use the scoped `@35bird/forge` package unless the existing `forge` npm owner transfers the unscoped name.
 
 ## Findings
 
@@ -68,7 +68,7 @@ Prepare npm package metadata and publish dry-run path.
 Ownership: package.json, package-lock.json, and package metadata docs/checklist if needed. Coordinate with Worker A by wiring the CLI bin only if src/cli.ts exists or by documenting the expected target.
 
 Required behavior:
-- Switch from occupied unscoped name planning to a scoped package such as @snootypants/forge.
+- Switch from occupied unscoped name planning to the scoped package `@35bird/forge`.
 - Preserve CLI command name as forge through package bin.
 - Remove private publish block only if package metadata is ready; otherwise add a clear publish-prep state.
 - Add files allowlist so npm excludes runtime DBs, identity, logs, eval data, research, and generated output.
@@ -94,9 +94,9 @@ Run npm run build.
 
 ## npm Publish Prep State
 
-Status: publish-ready metadata. The package metadata uses the scoped name `@snootypants/forge`, exposes the installed command as `forge`, and sets `publishConfig.access` to `public` for the scoped npm release.
+Status: publish-ready metadata. The package metadata uses the scoped name `@35bird/forge`, exposes the installed command as `forge`, and sets `publishConfig.access` to `public` for the scoped npm release.
 
-The npm package allowlist is limited to `dist/`, `README.md`, and `LICENSE`, so runtime databases, identity files, logs, eval data, research files, local config, and other repo output are excluded from `npm pack`. The `dist/` directory is intentionally the release artifact.
+The npm package allowlist is limited to `dist/`, `docs/install.md`, `README.md`, and `LICENSE`, so runtime databases, identity files, logs, eval data, research files, local config, and other repo output are excluded from `npm pack`. The `dist/` directory is intentionally the release artifact.
 
 The CLI command name remains `forge` through package `bin`:
 
@@ -174,7 +174,7 @@ Manager review sent three follow-up passes:
 - `npm run build`: passed using `node scripts/build-release.mjs`.
 - `git diff --check`: passed.
 - `npm audit --omit=dev`: passed, 0 vulnerabilities.
-- `npm pack --dry-run --json`: passed; package is `@snootypants/forge@1.0.0`, includes `dist/cli.js`, excludes runtime DBs, identity, logs, eval data, and research paths.
+- `npm pack --dry-run --json`: passed; package is `@35bird/forge@0.1.0`, includes `dist/cli.js`, excludes runtime DBs, identity, logs, eval data, and research paths.
 - Built CLI smoke: `node dist/cli.js init --force` and `node dist/cli.js token --config forge.config.yaml` passed without printing token values.
 - CI workflow structural check: passed for native `ubuntu-latest`, `macos-latest`, `windows-latest`, and Linux-only Docker smoke.
 - `docker build -t forge:install-hardening .`: passed.

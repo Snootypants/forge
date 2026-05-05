@@ -5,7 +5,7 @@ import type { ForgeConfig, ResolvedPaths } from '../types.ts';
 import type { DatabaseManager } from '../db/manager.ts';
 import type { MemoryService } from '../services/memory.ts';
 import type { LLMService } from '../services/llm.ts';
-import { settingsRoutes } from './routes/settings.ts';
+import { isLoopbackHost, isWebAuthRequired, settingsRoutes } from './routes/settings.ts';
 import { messagesRoutes } from './routes/messages.ts';
 import { authRoutes } from './routes/auth.ts';
 import { identityRoutes } from './routes/identity.ts';
@@ -76,6 +76,10 @@ function isSameOriginRequest(req: express.Request): boolean {
   return false;
 }
 
+function hasOriginSignal(req: express.Request): boolean {
+  return typeof req.headers.origin === 'string' || typeof req.headers.referer === 'string';
+}
+
 function isAllowedRequestOrigin(rawOrigin: string, req: express.Request): boolean {
   let url: URL;
   try {
@@ -89,6 +93,36 @@ function isAllowedRequestOrigin(rawOrigin: string, req: express.Request): boolea
 
   const protocol = requestProtocol(req);
   return url.protocol.replace(':', '') === protocol && url.host === host;
+}
+
+function isAllowedApiHost(req: express.Request, ctx: WebContext): boolean {
+  const host = req.get('host');
+  if (!host) return false;
+
+  const hostname = hostnameFromHostHeader(host);
+  if (hostname && isLoopbackHost(hostname)) return true;
+
+  return (ctx.config.services.web.allowed_hosts ?? []).some(allowed => hostMatchesAllowlist(host, hostname, allowed));
+}
+
+function hostnameFromHostHeader(host: string): string | null {
+  const trimmed = host.trim();
+  if (!trimmed || /[\s/\\]/.test(trimmed)) return null;
+  try {
+    return new URL(`http://${trimmed}`).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function hostMatchesAllowlist(rawHost: string, hostname: string | null, allowed: string): boolean {
+  const normalizedAllowed = allowed.trim().toLowerCase();
+  if (!normalizedAllowed) return false;
+  const normalizedHost = rawHost.trim().toLowerCase();
+  if (normalizedHost === normalizedAllowed) return true;
+
+  const allowedHostname = hostnameFromHostHeader(normalizedAllowed);
+  return Boolean(hostname && allowedHostname && hostname === allowedHostname && !normalizedAllowed.includes(':'));
 }
 
 function requestProtocol(req: express.Request): string {
@@ -115,6 +149,9 @@ export function createWebServer(ctx: WebContext): express.Express {
         contextWindowTokens: ctx.config.services.web.context_window_tokens,
         indexRebuildIntervalMinutes: ctx.config.memory.index_rebuild_interval_minutes,
       },
+      auth: {
+        required: isWebAuthRequired(ctx),
+      },
     });
   });
 
@@ -130,6 +167,21 @@ export function createWebServer(ctx: WebContext): express.Express {
 
   const authMiddleware: express.RequestHandler = (req, res, next) => {
     if (req.method === 'GET' && !req.path.startsWith('/api/')) {
+      return next();
+    }
+    if (!isWebAuthRequired(ctx)) {
+      if (req.path.startsWith('/api/') && !isAllowedApiHost(req, ctx)) {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
+      if (
+        MUTATING_METHODS.has(req.method)
+        && hasOriginSignal(req)
+        && !isSameOriginRequest(req)
+      ) {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
       return next();
     }
     if (req.path === '/api/auth/login') return next();

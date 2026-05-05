@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import { ForgeConfigSchema, type ForgeConfig, type KeyRef, type ResolvedPaths } from './types.ts';
+import { atomicWriteFileSync } from './utils/atomic-write.ts';
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const AUTH_TOKEN_FILENAME = 'web-auth-token';
@@ -72,6 +73,8 @@ export function loadConfig(configPath?: string): { config: ForgeConfig; resolved
   };
 
   const resolved: ResolvedPaths = {
+    configDir,
+    envPath: path.join(configDir, '.env'),
     root,
     dbs: resolvePath(config.paths.dbs),
     identity: resolvePath(config.paths.identity),
@@ -115,6 +118,7 @@ export function loadEnvFile(envPath?: string, options: { overrideLoaded?: boolea
 
 export function saveEnvValue(key: string, value: string, envPath?: string): void {
   const p = envPath ? resolveInputPath(envPath, process.cwd()) : defaultAppPath('.env');
+  fs.mkdirSync(path.dirname(p), { recursive: true, mode: 0o700 });
   let content = '';
   if (fs.existsSync(p)) {
     content = fs.readFileSync(p, 'utf-8');
@@ -135,8 +139,7 @@ export function saveEnvValue(key: string, value: string, envPath?: string): void
     updated.push(formatEnvLine(key, value));
   }
 
-  fs.writeFileSync(p, updated.join('\n'), { mode: 0o600 });
-  try { fs.chmodSync(p, 0o600); } catch { /* best effort */ }
+  atomicWriteFileSync(p, updated.join('\n'), { mode: 0o600 });
 }
 
 function parseEnvLine(line: string): { key: string; value: string } | null {
@@ -205,8 +208,7 @@ export function resolveWebAuthToken(
   fs.mkdirSync(resolved.logs, { recursive: true });
   try { fs.chmodSync(resolved.logs, 0o700); } catch { /* best effort */ }
   const token = crypto.randomBytes(32).toString('hex');
-  fs.writeFileSync(tokenPath, `${token}\n`, { mode: 0o600 });
-  try { fs.chmodSync(tokenPath, 0o600); } catch { /* best effort */ }
+  atomicWriteFileSync(tokenPath, `${token}\n`, { mode: 0o600 });
   return { token, source: 'generated', path: tokenPath };
 }
 
@@ -227,4 +229,24 @@ function applyEnvOverrides(config: ForgeConfig): void {
     }
     config.services.web.port = parsed;
   }
+
+  const authRequired = process.env.FORGE_WEB_AUTH_REQUIRED?.trim();
+  if (authRequired && parseEnvBoolean(authRequired)) {
+    config.services.web.auth_required = true;
+  }
+
+  const allowedHosts = process.env.FORGE_WEB_ALLOWED_HOSTS?.trim();
+  if (allowedHosts) {
+    config.services.web.allowed_hosts = allowedHosts
+      .split(',')
+      .map(host => host.trim())
+      .filter(Boolean);
+  }
+}
+
+function parseEnvBoolean(value: string): boolean {
+  const normalized = value.toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  throw new Error(`Invalid FORGE_WEB_AUTH_REQUIRED: ${value}`);
 }

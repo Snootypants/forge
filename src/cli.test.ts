@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { runCli } from './cli.ts';
+import { runCli, webAuthStartupMessages } from './cli.ts';
 import type { BootMode } from './types.ts';
 
 function tempDir(prefix: string): string {
@@ -18,7 +18,7 @@ function writeConfig(
   fs.writeFileSync(configPath, [
     'forge:',
     '  name: test-forge',
-    '  version: "1.0.0"',
+    '  version: "0.1.0"',
     '  root: .',
     'user:',
     '  name: tester',
@@ -52,6 +52,8 @@ test('forge init creates config and does not overwrite without --force', async (
     const configPath = path.join(tmp, 'forge.config.yaml');
     assert.ok(fs.existsSync(configPath));
     const first = fs.readFileSync(configPath, 'utf-8');
+    assert.match(first, /debug_prompt_context: false/);
+    assert.doesNotMatch(first, /debug_prompt_context: true/);
 
     assert.equal(await runCli(['init'], {
       cwd: tmp,
@@ -71,6 +73,18 @@ test('forge init creates config and does not overwrite without --force', async (
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('startup auth messages do not print generated token values', () => {
+  const output = webAuthStartupMessages({
+    token: 'generated-secret-token',
+    source: 'generated',
+    path: '/tmp/forge/web-auth-token',
+  }).join('\n');
+
+  assert.match(output, /forge token --show/);
+  assert.match(output, /web-auth-token/);
+  assert.doesNotMatch(output, /generated-secret-token/);
 });
 
 test('forge start maps mode and cwd config path into runtime boot', async () => {
@@ -164,8 +178,32 @@ test('forge token reports token locations and never prints token values', async 
     assert.equal(code, 0);
     assert.match(output, /services\.web\.auth_token is set/);
     assert.match(output, /web-auth-token exists/);
+    assert.match(output, /value: hidden; rerun with --show/);
     assert.doesNotMatch(output, /config-secret-token/);
     assert.doesNotMatch(output, /file-secret-token/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('forge token --show prints the selected token value explicitly', async () => {
+  const tmp = tempDir('forge-cli-token-show-');
+  const stdout: string[] = [];
+
+  try {
+    const configPath = writeConfig(tmp);
+    const tokenDir = path.join(tmp, 'var/logs');
+    fs.mkdirSync(tokenDir, { recursive: true });
+    fs.writeFileSync(path.join(tokenDir, 'web-auth-token'), 'file-secret-token\n');
+
+    const code = await runCli(['token', '--show', '--config', configPath], {
+      stdout: line => stdout.push(line),
+    });
+    const output = stdout.join('\n');
+
+    assert.equal(code, 0);
+    assert.match(output, /web-auth-token exists/);
+    assert.match(output, /value: file-secret-token/);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

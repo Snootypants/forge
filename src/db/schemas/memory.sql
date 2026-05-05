@@ -40,3 +40,22 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
   tags,
   tokenize='porter'
 );
+
+DROP TRIGGER IF EXISTS memories_fts_insert;
+DROP TRIGGER IF EXISTS memories_fts_delete;
+DROP TRIGGER IF EXISTS memories_fts_update;
+
+CREATE TRIGGER memories_fts_insert AFTER INSERT ON memories BEGIN
+  INSERT INTO memories_fts(id, content, tags)
+  VALUES (new.id, new.content, new.tags);
+END;
+
+CREATE TRIGGER memories_fts_delete AFTER DELETE ON memories BEGIN
+  DELETE FROM memories_fts WHERE id = old.id;
+END;
+
+CREATE TRIGGER memories_fts_update AFTER UPDATE OF content, tags ON memories BEGIN
+  DELETE FROM memories_fts WHERE id = old.id;
+  INSERT INTO memories_fts(id, content, tags)
+  VALUES (new.id, new.content, new.tags);
+END;

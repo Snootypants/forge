@@ -20,6 +20,8 @@ credentials.json
 # Local-only eval data/results
 eval/data/
 eval/results*.json
+feedback/
+research/
 
 # VCS, editor, and OS noise
 .git/

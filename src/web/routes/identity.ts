@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
+import { atomicWriteFileSync } from '../../utils/atomic-write.ts';
 
 const FILES = ['IDENTITY.md', 'SOUL.md', 'USER.md'] as const;
 
@@ -28,8 +29,7 @@ export function identityRoutes(identityDir: string, onChange?: () => void): Rout
       return;
     }
     const fp = path.join(identityDir, filename);
-    fs.writeFileSync(fp, content, { encoding: 'utf-8', mode: 0o600 });
-    try { fs.chmodSync(fp, 0o600); } catch { /* best effort */ }
+    atomicWriteFileSync(fp, content, { encoding: 'utf-8', mode: 0o600 });
     onChange?.();
     res.json({ ok: true });
   });

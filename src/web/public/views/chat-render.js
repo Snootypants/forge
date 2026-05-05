@@ -1,19 +1,19 @@
 let messages = [];
-let selectedMsgId = null;
+let selectedMsgKey = null;
 let thinking = false;
 let msgContainer = null;
 let toastFn = () => {};
 let apiCall = null;
 let assistantName = 'forge';
 let threadMetaConfig = { contextWindowTokens: 80000 };
-let traceSeq = 0;
+const traceOpenState = new Map();
 
 export function setMsgContainer(el) { msgContainer = el; }
 export function setMessages(m) { messages = m; }
 export function getMessages() { return messages; }
 export function getThinking() { return thinking; }
 export function setThinking(v) { thinking = v; }
-export function setSelectedMsgId(v) { selectedMsgId = v; }
+export function setSelectedMsgId(v) { selectedMsgKey = v === null || v === undefined ? null : messageKey(messages[v], v); }
 export function setToastFn(fn) { toastFn = fn; }
 export function setApiCall(fn) { apiCall = fn; }
 export function setAssistantName(name) {
@@ -25,16 +25,29 @@ export function setThreadMetaConfig(config) {
     ...config,
   };
 }
-
 function el(tag, cls) { const e = document.createElement(tag); if (cls) e.className = cls; return e; }
 function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function escAttr(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 function roleClass(role) {
   return ['system', 'user', 'assistant', 'tool'].includes(role) ? role : 'unknown';
 }
-function traceId() { traceSeq += 1; return `trace-body-${traceSeq}`; }
-function traceToggle(label, bodyId, open = false, count = '') {
-  return `<button class="trace-toggle" type="button" aria-expanded="${open}" aria-controls="${escAttr(bodyId)}">
+function stableDomId(...parts) {
+  return parts
+    .map(part => String(part ?? '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'item')
+    .join('-');
+}
+function messageKey(msg, idx = 0) {
+  return msg?.id || `local:${msg?.role || 'msg'}:${msg?.receivedAt || idx}:${idx}`;
+}
+function traceStateKey(msgKey, section) {
+  return `${msgKey}:${section}`;
+}
+function traceOpen(msgKey, section, fallback = false) {
+  const key = traceStateKey(msgKey, section);
+  return traceOpenState.has(key) ? traceOpenState.get(key) : fallback;
+}
+function traceToggle(label, bodyId, open = false, count = '', stateKey = '') {
+  return `<button class="trace-toggle" type="button" aria-expanded="${open}" aria-controls="${escAttr(bodyId)}" data-trace-key="${escAttr(stateKey)}">
     <span class="arrow${open ? ' open' : ''}" aria-hidden="true">›</span>
     <span class="smallcaps" style="font-size:10px">${esc(label)}</span>
     ${count !== '' ? `<span class="count">${esc(count)}</span>` : ''}
@@ -60,24 +73,35 @@ export function renderAllMessages() {
   messages.forEach((m, i) => {
     msgContainer.appendChild(m.role === 'assistant' ? mkAssistant(m, i, i === 0) : mkUser(m));
   });
+  if (thinking) {
+    msgContainer.appendChild(mkThinking());
+  }
   const lastA = messages.reduce((a, m, i) => m.role === 'assistant' ? i : a, -1);
-  if (lastA >= 0) selectMessage(lastA);
+  const selectedStillValid = selectedMsgKey !== null
+    && messages.some((m, i) => m.role === 'assistant' && messageKey(m, i) === selectedMsgKey);
+  if (!selectedStillValid && lastA >= 0) {
+    selectMessage(messageKey(messages[lastA], lastA));
+  } else {
+    renderInspector();
+  }
   renderThreadMeta();
 }
 
 export function mkAssistant(msg, idx, first) {
-  const div = el('div', `msg-assistant${selectedMsgId === idx ? ' selected' : ''}`);
+  const key = messageKey(msg, idx);
+  const div = el('div', `msg-assistant${selectedMsgKey === key ? ' selected' : ''}`);
   div.dataset.idx = idx;
+  div.dataset.msgKey = key;
   div.tabIndex = 0;
   div.setAttribute('role', 'button');
-  div.setAttribute('aria-pressed', String(selectedMsgId === idx));
+  div.setAttribute('aria-pressed', String(selectedMsgKey === key));
   div.setAttribute('aria-label', `Inspect ${assistantName} reply`);
   if (!first) div.style.marginTop = '36px';
-  div.addEventListener('click', () => selectMessage(idx));
+  div.addEventListener('click', () => selectMessage(key));
   div.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     e.preventDefault();
-    selectMessage(idx);
+    selectMessage(key);
   });
 
   div.appendChild(el('div', 'node-dot'));
@@ -145,22 +169,26 @@ export function mkThinking() {
   return div;
 }
 
-export function selectMessage(idx) {
-  selectedMsgId = idx;
+export function selectMessage(keyOrIdx) {
+  selectedMsgKey = typeof keyOrIdx === 'number'
+    ? messageKey(messages[keyOrIdx], keyOrIdx)
+    : keyOrIdx;
   document.querySelectorAll('.msg-assistant').forEach(e => {
-    const selected = parseInt(e.dataset.idx) === idx;
+    const selected = e.dataset.msgKey === selectedMsgKey;
     e.classList.toggle('selected', selected);
     e.setAttribute('aria-pressed', String(selected));
   });
   renderInspector();
 }
 
-function renderPromptSection(ctx) {
+function renderPromptSection(ctx, msgKey) {
   if (!ctx) {
-    const id = traceId();
+    const id = stableDomId('trace-body', msgKey, 'prompt-unavailable');
+    const stateKey = traceStateKey(msgKey, 'prompt-unavailable');
+    const open = traceOpen(msgKey, 'prompt-unavailable', false);
     return `<section>
-      ${traceToggle('Prompt trace', id, false, 'unavailable')}
-      <div class="trace-body" id="${id}" hidden>
+      ${traceToggle('Prompt trace', id, open, 'unavailable', stateKey)}
+      <div class="trace-body" id="${id}" ${open ? '' : 'hidden'}>
         <div class="trace-unavailable">
           Prompt trace is unavailable. Debug prompt capture may be disabled, or this message was loaded from history without trace data.
         </div>
@@ -179,17 +207,19 @@ function renderPromptSection(ctx) {
     ).join('');
   }
 
-  const systemId = traceId();
-  const messagesId = traceId();
+  const systemId = stableDomId('trace-body', msgKey, 'system');
+  const messagesId = stableDomId('trace-body', msgKey, 'messages');
+  const systemOpen = traceOpen(msgKey, 'system', false);
+  const messagesOpen = traceOpen(msgKey, 'messages', false);
   return `<section>
-      ${traceToggle('System prompt', systemId)}
-      <div class="trace-body" id="${systemId}" hidden>
+      ${traceToggle('System prompt', systemId, systemOpen, '', traceStateKey(msgKey, 'system'))}
+      <div class="trace-body" id="${systemId}" ${systemOpen ? '' : 'hidden'}>
         <div class="prompt-content">${esc(ctx.system || '')}</div>
       </div>
     </section>
     <section>
-      ${traceToggle('Messages', messagesId, false, msgCount)}
-      <div class="trace-body" id="${messagesId}" hidden>
+      ${traceToggle('Messages', messagesId, messagesOpen, msgCount, traceStateKey(msgKey, 'messages'))}
+      <div class="trace-body" id="${messagesId}" ${messagesOpen ? '' : 'hidden'}>
         ${messagesHtml || '<div style="font-size:11px;color:var(--ink-faint);font-style:italic">No messages in context.</div>'}
       </div>
     </section>`;
@@ -198,7 +228,8 @@ function renderPromptSection(ctx) {
 export function renderInspector() {
   const c = document.getElementById('inspector-panel');
   if (!c) return;
-  const msg = selectedMsgId !== null ? messages[selectedMsgId] : null;
+  const selectedIdx = messages.findIndex((m, i) => messageKey(m, i) === selectedMsgKey);
+  const msg = selectedIdx >= 0 ? messages[selectedIdx] : null;
 
   if (!msg || msg.role !== 'assistant') {
     c.innerHTML = `<div class="inspector-empty">
@@ -208,7 +239,9 @@ export function renderInspector() {
   }
 
   const meta = msg.meta || { model: '—', input: 0, output: 0 };
-  const usageId = traceId();
+  const msgKey = messageKey(msg, selectedIdx);
+  const usageId = stableDomId('trace-body', msgKey, 'usage');
+  const usageOpen = traceOpen(msgKey, 'usage', true);
   c.innerHTML = `<div class="inspector">
     <div>
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
@@ -218,8 +251,8 @@ export function renderInspector() {
       <div style="font-size:11.5px;color:var(--ink-mute);line-height:1.45">Metadata for this reply.</div>
     </div>
     <section>
-      ${traceToggle('Usage', usageId, true)}
-      <div class="trace-body" id="${usageId}">
+      ${traceToggle('Usage', usageId, usageOpen, '', traceStateKey(msgKey, 'usage'))}
+      <div class="trace-body" id="${usageId}" ${usageOpen ? '' : 'hidden'}>
         <div class="usage-grid">
           <span style="color:var(--ink-mute)">model</span>
           <span class="mono" style="color:var(--ink)">${esc(meta.model)}</span>
@@ -232,7 +265,7 @@ export function renderInspector() {
         </div>
       </div>
     </section>
-    ${renderPromptSection(msg.promptContext)}
+    ${renderPromptSection(msg.promptContext, msgKey)}
   </div>`;
 
   setupTraceToggles(c);
@@ -245,6 +278,7 @@ function setupTraceToggles(container) {
       const arrow = btn.querySelector('.arrow');
       if (!body) return;
       const open = btn.getAttribute('aria-expanded') === 'true';
+      if (btn.dataset.traceKey) traceOpenState.set(btn.dataset.traceKey, !open);
       btn.setAttribute('aria-expanded', String(!open));
       body.hidden = open;
       arrow?.classList.toggle('open', !open);
@@ -261,23 +295,24 @@ export function renderThreadMeta() {
   const pct = Math.min(100, (tokens / contextWindowTokens) * 100);
   const initial = assistantName.trim().slice(0, 1).toUpperCase() || 'F';
 
-  c.innerHTML = `<div class="thread-meta">
+  if (c.dataset.ready !== 'true') {
+    c.innerHTML = `<div class="thread-meta">
     <div style="display:flex;flex-direction:column;gap:14px">
       <div class="rail-stat">
         <div class="smallcaps stat-label" style="font-size:9.5px">turns</div>
-        <div class="stat-value">${count}</div>
+        <div class="stat-value" data-thread-turns></div>
       </div>
       <div class="rail-stat">
         <div class="smallcaps stat-label" style="font-size:9.5px">context</div>
-        <div class="stat-value">${(tokens / 1000).toFixed(1)}k / ${(contextWindowTokens / 1000).toFixed(0)}k tok</div>
+        <div class="stat-value" data-thread-context></div>
       </div>
-      <div class="context-meter"><div class="fill" style="width:${pct}%"></div></div>
+      <div class="context-meter"><div class="fill" data-thread-meter></div></div>
     </div>
     <div style="border-top:1px solid var(--rule);padding-top:14px">
       <div class="smallcaps" style="margin-bottom:8px">Agent</div>
       <div class="agent-row">
-        <span class="initial" style="background:var(--accent-wash-strong);color:var(--accent-ink)">${esc(initial)}</span>
-        <span class="name">${esc(assistantName)}</span>
+        <span class="initial" style="background:var(--accent-wash-strong);color:var(--accent-ink)" data-agent-initial></span>
+        <span class="name" data-agent-name></span>
         <div style="flex:1;min-width:8px"></div>
         <span class="time">now</span>
       </div>
@@ -288,7 +323,19 @@ export function renderThreadMeta() {
     </div>
   </div>`;
 
-  loadIdentityFiles();
+    c.dataset.ready = 'true';
+  }
+
+  c.querySelector('[data-thread-turns]').textContent = String(count);
+  c.querySelector('[data-thread-context]').textContent = `${(tokens / 1000).toFixed(1)}k / ${(contextWindowTokens / 1000).toFixed(0)}k tok`;
+  c.querySelector('[data-thread-meter]').style.width = `${pct}%`;
+  c.querySelector('[data-agent-initial]').textContent = initial;
+  c.querySelector('[data-agent-name]').textContent = assistantName;
+
+  const identityFiles = c.querySelector('#identity-files');
+  if (identityFiles && identityFiles.dataset.loaded !== 'true') {
+    loadIdentityFiles();
+  }
 }
 
 async function loadIdentityFiles() {
@@ -304,6 +351,7 @@ async function loadIdentityFiles() {
       row.querySelector('.btn-edit').addEventListener('click', () => openEditor(file));
       container.appendChild(row);
     }
+    container.dataset.loaded = 'true';
   } catch { /* identity endpoint may not exist yet */ }
 }
 

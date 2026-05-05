@@ -17,8 +17,14 @@ CREATE TABLE IF NOT EXISTS chunks (
   timestamp_start TEXT,
   timestamp_end TEXT,
   embedding BLOB,
-  FOREIGN KEY (conversation_uuid) REFERENCES conversations(uuid)
+  FOREIGN KEY (conversation_uuid) REFERENCES conversations(uuid) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_chunks_conv ON chunks(conversation_uuid);
 CREATE INDEX IF NOT EXISTS idx_chunks_timestamp_start ON chunks(timestamp_start);
+
+DROP TRIGGER IF EXISTS chunks_conversation_delete;
+
+CREATE TRIGGER chunks_conversation_delete AFTER DELETE ON conversations BEGIN
+  DELETE FROM chunks WHERE conversation_uuid = old.uuid;
+END;
